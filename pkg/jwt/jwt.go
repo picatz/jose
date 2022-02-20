@@ -20,6 +20,11 @@ import (
 	"github.com/picatz/jose/pkg/jws"
 )
 
+// HeaderType "JWT" is used as the "typ" for all JSON Web Tokens.
+//
+// https://datatracker.ietf.org/doc/html/rfc7519#section-5.1
+const HeaderType header.ParamaterName = "JWT"
+
 // Token is a decoded JSON Web Token, a string representing a
 // set of claims as a JSON object that is encoded in a JWS or
 // JWE, enabling the claims to be digitally signed or MACed
@@ -27,6 +32,8 @@ import (
 //
 // At this time, only JWS JWTs are supported. In other words,
 // these tokens are only signed, not encrypted.
+//
+// https://datatracker.ietf.org/doc/html/rfc7519#section-1
 type Token struct {
 	Header    header.Parameters
 	Claims    ClaimsSet
@@ -34,49 +41,71 @@ type Token struct {
 	raw       string
 }
 
-// New is used to create a signed Token object. If this fails for any reason, an error
-// is returned with a nil token.
-func New(headerParams header.Parameters, claims ClaimsSet, key interface{}) (*Token, error) {
-	// verify or otherwise handle claim types nicely
+// New can be used to create a signed Token object. If this fails for any
+// reason, an error is returned with a nil token.
+//
+// Using this function does not require the given header parameters define
+// the "typ" (header.Type), which is always set to "JWT" (header.TypeJWT), but
+// callers can include it if they like.
+//
+// The claims set must not be empty, or will return an error.
+//
+// The given key can be a symmetric or asymmetric (private) key. The type for this
+// argument depends on the algorithm "alg" defined in the header.
+//
+// Algorithm(s) to Supported Key Type(s):
+//  - HS256, HS384, HS512: []byte or string
+//  - RS256: *rsa.PrivateKey
+//  - ES256: *ecdsa.PrivateKey
+func New(params header.Parameters, claims ClaimsSet, key interface{}) (*Token, error) {
+	// Given params set cannot be empty.
+	if len(params) == 0 {
+		return nil, ErrNoJWTHeaderParametersSet
+	}
+
+	// Given claims set cannot be emtpy.
+	if len(claims) == 0 {
+		return nil, ErrNoClaimSet
+	}
+
+	// Verify or otherwise handle registered claim types nicely.
 	for name, value := range claims {
 		switch name {
 		case ExpirationTime, NotBefore, IssuedAt:
 			switch v := value.(type) {
-			case int64: // good
-			case time.Time: // ok
+			// good
+			case int64:
+			// ok
+			case time.Time:
 				claims[name] = v.Unix()
-			default: // bad
+			// bad
+			default:
 				return nil, NewInvalidTypeError(fmt.Errorf("cannot use %T with %q", v, ExpirationTime))
 			}
 		case Issuer, Subject, Audience:
 			switch v := value.(type) {
-			case string: // good
-			case fmt.Stringer: // ok
+			// good
+			case string:
+			// ok
+			case fmt.Stringer:
 				claims[name] = v.String()
-			default: // bad
+			// bad
+			default:
 				return nil, NewInvalidTypeError(fmt.Errorf("cannot use %T with %q", v, ExpirationTime))
 			}
 		}
 	}
 
-	if len(claims) == 0 {
-		return nil, ErrNoClaimSet
-	}
+	// Header type parameter "typ" is always "JWT".
+	params[header.Type] = header.TypeJWT
 
-	if len(headerParams) == 0 {
-		return nil, fmt.Errorf("no JWT header paramaters provided")
-	}
-
-	// header type parameter "typ" is always JWT
-	headerParams[header.Type] = header.TypeJWT
-
-	// create a token, in preperation to sign it
+	// Create a token, in preparation to sign it.
 	token := &Token{
-		Header: headerParams,
+		Header: params,
 		Claims: claims,
 	}
 
-	// sign it
+	// Sign it.
 	_, err := token.Sign(SecretKey(key))
 	if err != nil {
 		return nil, NewSigningError(err)
@@ -193,7 +222,7 @@ type Config struct {
 	SecretKey         interface{}
 	PublicKey         interface{}
 
-	// TODO(kent): add more verify options for other algorithims
+	// TODO(kent): add more verify options for other algorithms
 }
 
 type ConfigOption = func(*Config) error
@@ -780,6 +809,8 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 	return t.Signature, nil
 }
 
+// Verify is used to verify a signed Token object with the given config options.
+// If this fails for any reason, an error is returned.
 func (t *Token) Verify(opts ...ConfigOption) error {
 	err := t.VerifySignature(opts...)
 	if err != nil {
