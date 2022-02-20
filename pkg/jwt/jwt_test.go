@@ -738,26 +738,3 @@ func TestVerify(t *testing.T) {
 		})
 	}
 }
-
-var now = time.Time{} // time.Now() would be used in reality
-
-func ExampleNew() {
-	token, err := New(
-		header.Parameters{
-			header.Type:      header.TypeJWT,
-			header.Algorithm: jwa.HS256,
-		},
-		ClaimsSet{
-			Subject:        "example",
-			IssuedAt:       now,
-			NotBefore:      now.Add(2 * time.Hour),
-			ExpirationTime: now.Add(24 * time.Hour),
-		},
-		testHMACSecretKey,
-	)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(token)
-	// Output: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9Cg.eyJleHAiOi02MjEzNTUxMDQwMCwiaWF0IjotNjIxMzU1OTY4MDAsIm5iZiI6LTYyMTM1NTg5NjAwLCJzdWIiOiJleGFtcGxlIn0K.ha_kAIOiX9BQegjRlPSBMuAcEo8slvXGmJPq8HaTNlU
-}

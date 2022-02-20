@@ -38,7 +38,7 @@ const (
 	JWTID          Registered = "jti"
 )
 
-// ClaimsSet is a JSON object that contains the claims conveyed by the JWT.
+// ClaimsSet is a JSON object that contains the claims in a JWT.
 //
 // A claim is a piece of information asserted about a subject, represented
 // as a name/value pair consisting of a Claim Name and a Claim Value.

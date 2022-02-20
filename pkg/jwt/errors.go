@@ -6,7 +6,8 @@ import (
 )
 
 var (
-	ErrNoClaimSet = errors.New("no claim set")
+	ErrNoClaimSet               = errors.New("no claim set")
+	ErrNoJWTHeaderParametersSet = errors.New("no JWT header parameters set")
 )
 
 type ErrSigningFailed struct {
@@ -30,7 +31,7 @@ type ErrInvalidType struct {
 }
 
 func (e *ErrInvalidType) Error() string {
-	return fmt.Sprintf("signing failed: %v", e.Inner)
+	return fmt.Sprintf("invalid type: %v", e.Inner)
 }
 
 func (e *ErrInvalidType) Unwrap() error {
