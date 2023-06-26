@@ -468,8 +468,6 @@ func TestSignJWT(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sig)
 	require.Equal(t, token.Signature, sig)
-
-	t.Logf("%v", token)
 }
 
 func TestNew(t *testing.T) {
@@ -480,7 +478,7 @@ func TestNew(t *testing.T) {
 		Claims                  ClaimsSet
 		SigningKey              interface{}
 		VerifyKey               interface{}
-		AllowedVerifyAlgorithms jwa.AllowedAlgorithms
+		AllowedVerifyAlgorithms []jwa.Algorithm
 	}{
 		{
 			Name: "no signing key",
@@ -532,7 +530,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              testHMACSecretKey,
 			VerifyKey:               testHMACSecretKey,
-			AllowedVerifyAlgorithms: jwa.NewAllowedAlgorithms(jwa.HS256),
+			AllowedVerifyAlgorithms: []jwa.Algorithm{jwa.HS256},
 		},
 	}
 
@@ -556,13 +554,13 @@ func TestNew(t *testing.T) {
 					if symEnc {
 						err = token.VerifySignature(
 							SecretKey(test.VerifyKey),
-							AllowedAlgorithms(test.AllowedVerifyAlgorithms.List()...),
+							AllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
 						require.NoError(t, err)
 					} else { // asym
 						err = token.VerifySignature(
 							PublicKey(test.VerifyKey),
-							AllowedAlgorithms(test.AllowedVerifyAlgorithms.List()...),
+							AllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
 						require.NoError(t, err)
 					}
@@ -736,5 +734,39 @@ func TestVerify(t *testing.T) {
 				require.NoError(t, err)
 			}
 		})
+	}
+}
+
+// go test -fuzz FuzzParseString
+func FuzzParseString(f *testing.F) {
+	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0.")
+	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0")
+	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0.eyJzdWIiOiJ0ZXN0In0")
+	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0.z.z")
+	f.Add("eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ")
+	f.Add("eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ.")
+	f.Add("eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImthdGFyYXMifQ.U3ChCsJwStNnEdE_wgkh5elQHIKPYfdi4BZoy8CWQNAaFymND_-6fwghDC4bQRrcotXjD6WZDaSrJ_W7uVoBBQ")
+	f.Add("eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg")
+
+	f.Fuzz(func(t *testing.T, data string) {
+		_, err := ParseString(data)
+		if err != nil {
+			t.Skip()
+		}
+	})
+}
+
+var parseStringResult *Token
+
+func BenchmarkParseString(b *testing.B) {
+	s := "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ"
+
+	var err error
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		parseStringResult, err = ParseString(s)
+		require.NoError(b, err)
 	}
 }

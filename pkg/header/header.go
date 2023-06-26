@@ -13,7 +13,7 @@ import (
 // Parameter names, Public Header Parameter names, and Private Header
 // Parameter names.
 type (
-	ParamaterName string
+	ParamaterName = string
 
 	Registered = ParamaterName
 	Public     = ParamaterName
@@ -80,12 +80,12 @@ func (h Parameters) Algorithm() (jwa.Algorithm, error) {
 	if !ok {
 		return "", fmt.Errorf("header does not contain a %q paramater", Algorithm)
 	}
-	switch v := value.(type) {
-	case string:
-		return jwa.Algorithm(v), nil
-	case jwa.Algorithm:
-		return v, nil
+
+	alg, ok := value.(jwa.Algorithm)
+	if ok {
+		return alg, nil
 	}
+
 	return "", fmt.Errorf("header paramater %q is invalid type %T", Algorithm, value)
 }
 
