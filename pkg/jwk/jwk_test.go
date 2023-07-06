@@ -208,3 +208,27 @@ func TestMicrosoftLoginWellKnownKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestGitHubActionsWellKnownKeys(t *testing.T) {
+	timeout := 5 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	client := &http.Client{
+		Transport: http.DefaultTransport,
+		Timeout:   timeout,
+	}
+
+	// https://token.actions.githubusercontent.com/.well-known/openid-configuration
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://token.actions.githubusercontent.com/.well-known/jwks", nil)
+	require.NoError(t, err)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+
+	set := Set{}
+	err = json.NewDecoder(resp.Body).Decode(&set)
+	require.NoError(t, err)
+	require.NotEmpty(t, set.Keys)
+}

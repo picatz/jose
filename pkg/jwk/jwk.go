@@ -12,7 +12,7 @@ import (
 
 // https://datatracker.ietf.org/doc/html/rfc7517#section-4
 type (
-	ParamaterName string
+	ParamaterName = string
 
 	RSA       = ParamaterName
 	ECDSA     = ParamaterName
@@ -38,20 +38,120 @@ const (
 
 	N RSA = "n"
 	E RSA = "e"
-	D RSA = "d" // used for RSA key blinding operation (https://datatracker.ietf.org/doc/html/rfc7517#ref-Kocher)
+	D RSA = "d"
 )
 
-type Value = map[ParamaterName]interface{}
+// Values is a JSON object containing the parameters describing
+// the cryptographic operations and parameters employed.
+//
+// https://datatracker.ietf.org/doc/html/rfc7517#section-4
+type Value = map[ParamaterName]any
 
+// Validate checks that the required parameters are present for
+// the given key type, and that the values are valid.
 func Validate(v Value) error {
 	_, ok := v[KeyType]
 	if !ok {
 		return fmt.Errorf("missing required paramater %q", KeyType)
 	}
-	// TOOD: add more validation
+
+	switch v[KeyType] {
+	case "EC":
+		curveValue, ok := v[Curve]
+		if !ok {
+			return fmt.Errorf("missing required paramater %q", Curve)
+		}
+
+		if curve, ok := curveValue.(string); ok {
+			switch curve {
+			case "P-256":
+				// ok
+			case "P-384":
+				// ok
+			case "P-521":
+				// ok
+			default:
+				return fmt.Errorf("invalid curve %q", curve)
+			}
+		} else {
+			return fmt.Errorf("invalid curve type %T", curveValue)
+		}
+
+		xValue, ok := v[X]
+		if !ok {
+			return fmt.Errorf("missing required paramater %q", X)
+		}
+
+		if x, ok := xValue.(string); ok {
+			_, err := base64.Decode(x)
+			if err != nil {
+				return fmt.Errorf("invalid base64 encoding for %q: %w", X, err)
+			}
+		} else {
+			return fmt.Errorf("invalid type for %q", X)
+		}
+
+		yValue, ok := v[Y]
+		if !ok {
+			return fmt.Errorf("missing required paramater %q", Y)
+		}
+
+		if y, ok := yValue.(string); ok {
+			_, err := base64.Decode(y)
+			if err != nil {
+				return fmt.Errorf("invalid base64 encoding for %q: %w", Y, err)
+			}
+		} else {
+			return fmt.Errorf("invalid type for %q", Y)
+		}
+	case "RSA":
+		nValue, ok := v[N]
+		if !ok {
+			return fmt.Errorf("missing required paramater %q", N)
+		}
+
+		if n, ok := nValue.(string); ok {
+			_, err := base64.Decode(n)
+			if err != nil {
+				return fmt.Errorf("invalid base64 encoding for %q: %w", N, err)
+			}
+		} else {
+			return fmt.Errorf("invalid type for %q", N)
+		}
+
+		eValue, ok := v[E]
+		if !ok {
+			return fmt.Errorf("missing required paramater %q", E)
+		}
+
+		if e, ok := eValue.(string); ok {
+			_, err := base64.Decode(e)
+			if err != nil {
+				return fmt.Errorf("invalid base64 encoding for %q: %w", E, err)
+			}
+		} else {
+			return fmt.Errorf("invalid type for %q", E)
+		}
+
+		dValue, ok := v[D]
+		if ok { // optional
+			if d, ok := dValue.(string); ok {
+				_, err := base64.Decode(d)
+				if err != nil {
+					return fmt.Errorf("invalid base64 encoding for %q: %w", D, err)
+				}
+			} else {
+				return fmt.Errorf("invalid type for %q", D)
+			}
+		}
+	default:
+		return fmt.Errorf("unknown key type %q", v[KeyType])
+	}
+
 	return nil
 }
 
+// RSAValues returns the values for the RSA key type.
 func RSAValues(v Value) (n, e, d string, err error) {
 	if v[KeyType] != "RSA" {
 		err = fmt.Errorf("JWK value is not RSA")
@@ -80,6 +180,7 @@ func RSAValues(v Value) (n, e, d string, err error) {
 	return
 }
 
+// ECDSAValues returns the values for the ECDSA key type.
 func ECDSAValues(v Value) (crv, x, y string, err error) {
 	if v[KeyType] != "EC" {
 		err = fmt.Errorf("JWK value is not RSA")
@@ -107,6 +208,7 @@ func ECDSAValues(v Value) (crv, x, y string, err error) {
 	return
 }
 
+// SymmetricKey returns the symmetric key.
 func SymmetricKey(v Value) (k string, err error) {
 	k = fmt.Sprintf("%v", v[K])
 
@@ -117,6 +219,7 @@ func SymmetricKey(v Value) (k string, err error) {
 	return
 }
 
+// HMACSecretKey returns the HMAC secret key (symmetric key).
 func HMACSecretKey(v Value) ([]byte, error) {
 	key, err := SymmetricKey(v)
 	if err != nil {
@@ -125,6 +228,8 @@ func HMACSecretKey(v Value) ([]byte, error) {
 	return base64.Decode(key)
 }
 
+// RSAPublicKey returns the RSA public key and blinding value, or an error
+// if the key is not an RSA public key.
 func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error) {
 	nEnc, eEnc, dEnc, err := RSAValues(v)
 	if err != nil {
@@ -133,14 +238,17 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 	}
 
 	var (
+		// n is the RSA public modulus.
 		n = new(big.Int)
+
+		// e is the RSA public exponent.
 		e = new(big.Int)
+
+		// d is the RSA private exponent.
 		d []byte
 	)
 
-	if pkey == nil {
-		pkey = &rsa.PublicKey{}
-	}
+	pkey = &rsa.PublicKey{}
 
 	nBytes, err := base64.Decode(nEnc)
 	if err != nil {
@@ -172,6 +280,8 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 	return
 }
 
+// ECDSAPublicKey returns the ECDSA public key and blinding value, or an error
+// if the key is not an ECDSA public key.
 func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err error) {
 	crv, xEnc, yEnc, err := ECDSAValues(v)
 	if err != nil {
@@ -221,11 +331,18 @@ func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err e
 	return
 }
 
+// Set is a JWK set as defined in RFC 7517.
+//
 // https://datatracker.ietf.org/doc/html/rfc7517#section-5
 type Set struct {
+	// Keys is a list of JWK values.
+	//
+	// https://datatracker.ietf.org/doc/html/rfc7517#section-5.1
 	Keys []Value `json:"keys"`
 }
 
+// Validate validates the JWK set, returning an error if any
+// of the keys are invalid.
 func (s *Set) Validate() error {
 	if len(s.Keys) == 0 {
 		return fmt.Errorf("no key values in JWK set")
