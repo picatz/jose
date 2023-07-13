@@ -76,10 +76,3 @@ const (
 	ES256K Algorithm = "ES256K"
 	EdDSA  Algorithm = "EdDSA"
 )
-
-// DefaultAllowedAlgorithms returns a list of algorithms that are allowed to be used.
-func DefaultAllowedAlgorithms() []Algorithm {
-	return []Algorithm{
-		RS256, ES256,
-	}
-}

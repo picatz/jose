@@ -470,6 +470,12 @@ func TestSignJWT(t *testing.T) {
 	require.Equal(t, token.Signature, sig)
 }
 
+func defaultAllowedAlogrithms() []jwa.Algorithm {
+	return []jwa.Algorithm{
+		jwa.RS256, jwa.ES256,
+	}
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		Name                    string
@@ -491,7 +497,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              nil,
 			Error:                   true,
-			AllowedVerifyAlgorithms: jwa.DefaultAllowedAlgorithms(),
+			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
 		},
 		{
 			Name: "RSA SHA256",
@@ -504,7 +510,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              testRSASHA256PrviateKey,
 			VerifyKey:               testRSASHA256PublicKey,
-			AllowedVerifyAlgorithms: jwa.DefaultAllowedAlgorithms(),
+			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
 		},
 		{
 			Name: "ECDSA SHA256",
@@ -517,7 +523,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              testECDSAPrivateKey,
 			VerifyKey:               testECDSAPublicKey,
-			AllowedVerifyAlgorithms: jwa.DefaultAllowedAlgorithms(),
+			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
 		},
 		{
 			Name: "HMAC SHA256",
