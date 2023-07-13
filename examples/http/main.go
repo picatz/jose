@@ -32,13 +32,7 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		bearerToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
-		token, err := jwt.ParseString(bearerToken)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		err = token.Verify(jwt.SecretKey("supersecret"))
+		_, err := jwt.ParseAndVerify(bearerToken, jwt.SecretKey("supersecret"))
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
