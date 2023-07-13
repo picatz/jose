@@ -551,7 +551,7 @@ func (t *Token) VerifySignature(veryifyOptions ...ConfigOption) error {
 		}
 		return t.VerifyEdDSASignature(publicKey)
 	default:
-		return fmt.Errorf("algorithm %q not implemented", alg)
+		return fmt.Errorf("algorithm %q not implemented or allowed", alg)
 	}
 }
 
