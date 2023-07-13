@@ -268,6 +268,7 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 
 	pkey.E = int(e.Int64())
 
+	// d is optional
 	if len(dEnc) > 0 {
 		d, err = base64.Decode(dEnc)
 		if err != nil {
