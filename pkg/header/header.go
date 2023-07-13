@@ -52,7 +52,7 @@ const TypeJWT = "JWT"
 //
 // The JOSE (JSON Object Signing and Encryption) Parameters is comprised
 // of a set of Parameters Parameters.
-type Parameters map[ParamaterName]interface{}
+type Parameters map[ParamaterName]any
 
 func (h Parameters) Base64URLString() (string, error) {
 	buff := bytes.NewBuffer(nil)
