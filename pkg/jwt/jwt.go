@@ -173,7 +173,36 @@ func (t *Token) String() string {
 	return t.computeString()
 }
 
-// ParseString parses an input JWT string, and returns a Token
+// Parse parses a given JWT, and returns a Token or an error
+// if the JWT fails to parse.
+func Parse(input any) (*Token, error) {
+	switch input := input.(type) {
+	case string:
+		return ParseString(input)
+	case []byte:
+		return ParseString(string(input))
+	default:
+		return nil, fmt.Errorf("invalid type %T used for JWT parsing", input)
+	}
+}
+
+// ParseAndVerify parses a given JWT, and verifies the signature
+// using the given verification configuration options.
+func ParseAndVerify(input any, veryifyOptions ...ConfigOption) (*Token, error) {
+	token, err := Parse(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse JWT: %w", err)
+	}
+
+	err = token.VerifySignature(veryifyOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify JWT signature: %w", err)
+	}
+
+	return token, nil
+}
+
+// ParseString parses a given JWT string, and returns a Token
 // or an error if the JWT fails to parse.
 func ParseString(input string) (*Token, error) {
 	token := &Token{}
