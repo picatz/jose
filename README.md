@@ -7,7 +7,7 @@ JavaScript Object Signing and Encryption ([JOSE](https://datatracker.ietf.org/wg
 ```go
 token, _ := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
 
-err := token.VerifySignature(jwt.AllowedAlgorithms(jwa.HS256), jwt.SecretKey("supersecret"))
+err := token.VerifySignature(jwt.SecretKey("supersecret"))
 
 sub, _ := token.Claims.Get(jwt.Subject)
 iat, _ := token.Claims.Get(jwt.IssuedAt)
