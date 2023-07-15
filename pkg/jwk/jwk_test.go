@@ -58,6 +58,25 @@ func TestValueRSA(t *testing.T) {
 	require.Equal(t, 65537, pkey.E)
 }
 
+func TestValueEd25519(t *testing.T) {
+	input := `
+	{
+		"kty":"OKP",
+		"crv":"Ed25519",
+		"x":"3pP2u1u8vI1qT5Z0Xq5bZ7MfCqE8pYzX1VXU5Y7w8XU",
+		"use":"sig",
+		"kid":"test"
+	}`
+
+	value := Value{}
+	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
+	require.NoError(t, err)
+
+	x, err := Ed25519Values(value)
+	require.NoError(t, err)
+	require.NotEmpty(t, x)
+}
+
 func TestSet(t *testing.T) {
 	input := `
 	{
@@ -231,4 +250,30 @@ func TestGitHubActionsWellKnownKeys(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&set)
 	require.NoError(t, err)
 	require.NotEmpty(t, set.Keys)
+}
+
+func TestURLSetCache(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cache := NewURLSetCache(http.DefaultClient, 24*time.Hour, 6*time.Hour)
+
+	go func() {
+		err := cache.Start(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	ghaJWKsURL := "https://token.actions.githubusercontent.com/.well-known/jwks"
+
+	set, err := cache.Get(ctx, ghaJWKsURL)
+	require.NoError(t, err)
+	require.NotEmpty(t, set.Keys)
+
+	firstKeyID := set.Keys[0][KeyID].(string)
+
+	firstKey, err := cache.GetKey(ctx, ghaJWKsURL, firstKeyID)
+	require.NoError(t, err)
+	require.NotEmpty(t, firstKey)
 }
