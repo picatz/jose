@@ -18,7 +18,7 @@ func ExampleParseString() {
 		panic(fmt.Sprintf("failed to parse JWT string: %v", err))
 	}
 
-	err = token.VerifySignature(jwt.AllowedAlgorithms(jwa.HS256), jwt.SecretKey("supersecret"))
+	err = token.VerifySignature(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("supersecret"))
 	if err != nil {
 		panic(fmt.Sprintf("failed to verify JWT signature: %v", err))
 	}
@@ -37,7 +37,7 @@ func TestExampleJWTParseStringAndVerifySignatureHS256(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, token)
 
-	err = token.VerifySignature(jwt.AllowedAlgorithms(jwa.HS256), jwt.SecretKey("supersecret"))
+	err = token.VerifySignature(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("supersecret"))
 	require.NoError(t, err)
 
 	alg, err := token.Header.Algorithm()
@@ -77,7 +77,7 @@ func TestExampleCreateJWTAndSignWithHS256(t *testing.T) {
 		},
 	}
 
-	signature, err := token.Sign(jwt.SecretKey("supersecret"))
+	signature, err := token.Sign("supersecret")
 	require.NoError(t, err)
 	require.NotNil(t, signature)
 	require.NotEmpty(t, signature)

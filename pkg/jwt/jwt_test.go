@@ -274,7 +274,7 @@ func TestTokenString(t *testing.T) {
 
 	t.Logf("before sign: %s", token)
 
-	sig, err := token.Sign(SecretKey(testHMACSecretKey))
+	sig, err := token.Sign(testHMACSecretKey)
 	require.NoError(t, err)
 	require.NotEmpty(t, sig)
 
@@ -318,7 +318,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyECDSASignature(crypto.SHA256, testECDSAPublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(ECDSAPublicKey(testECDSAPublicKey))
+				err = token.VerifySignature(WithKey(testECDSAPublicKey))
 				require.NoError(t, err)
 			},
 		},
@@ -333,7 +333,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())
 
-				err := token.VerifySignature(ECDSAPublicKey(testECDSAPublicKey), AllowedAlgorithms(jwa.RS256))
+				err := token.VerifySignature(WithKey(testECDSAPublicKey), WithAllowedAlgorithms(jwa.RS256))
 				require.Error(t, err)
 			},
 		},
@@ -359,7 +359,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyRSASignature(crypto.SHA256, testRSASHA256PublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(RSAPublicKey(testRSASHA256PublicKey))
+				err = token.VerifySignature(WithKey(testRSASHA256PublicKey))
 				require.NoError(t, err)
 			},
 		},
@@ -407,7 +407,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyHMACSignature(crypto.SHA256, testHMACSecretKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(SecretKey(testHMACSecretKey), AllowedAlgorithms(jwa.HS256))
+				err = token.VerifySignature(WithKey(testHMACSecretKey), WithAllowedAlgorithms(jwa.HS256))
 				require.NoError(t, err)
 			},
 		},
@@ -431,7 +431,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyEdDSASignature(testEdDSAPublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(EdDSAPublicKey(testEdDSAPublicKey), AllowedAlgorithms(jwa.EdDSA))
+				err = token.VerifySignature(WithKey(testEdDSAPublicKey), WithAllowedAlgorithms(jwa.EdDSA))
 				require.NoError(t, err)
 			},
 		},
@@ -464,7 +464,7 @@ func TestSignJWT(t *testing.T) {
 		},
 	}
 
-	sig, err := token.Sign(RSAPrivateKey(testRSASHA256PrviateKey))
+	sig, err := token.Sign(testRSASHA256PrviateKey)
 	require.NoError(t, err)
 	require.NotNil(t, sig)
 	require.Equal(t, token.Signature, sig)
@@ -559,14 +559,14 @@ func TestNew(t *testing.T) {
 					require.NoError(t, err)
 					if symEnc {
 						err = token.VerifySignature(
-							SecretKey(test.VerifyKey),
-							AllowedAlgorithms(test.AllowedVerifyAlgorithms...),
+							WithKey(test.VerifyKey),
+							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
 						require.NoError(t, err)
 					} else { // asym
 						err = token.VerifySignature(
-							PublicKey(test.VerifyKey),
-							AllowedAlgorithms(test.AllowedVerifyAlgorithms...),
+							WithKey(test.VerifyKey),
+							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
 						require.NoError(t, err)
 					}
@@ -733,7 +733,7 @@ func TestVerify(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, token)
 
-			err = token.Verify(PublicKey(test.VerifyKey))
+			err = token.Verify(WithKey(test.VerifyKey))
 			if test.Error {
 				require.Error(t, err)
 			} else {

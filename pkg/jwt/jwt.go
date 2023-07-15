@@ -124,7 +124,7 @@ func New(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
 	}
 
 	// Sign it.
-	_, err := token.Sign(SecretKey(key))
+	_, err := token.Sign(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -188,7 +188,7 @@ func Parse(input any) (*Token, error) {
 
 // ParseAndVerify parses a given JWT, and verifies the signature
 // using the given verification configuration options.
-func ParseAndVerify(input any, veryifyOptions ...ConfigOption) (*Token, error) {
+func ParseAndVerify(input any, veryifyOptions ...VerifyOption) (*Token, error) {
 	token, err := Parse(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse JWT: %w", err)
@@ -282,23 +282,22 @@ func NewSet(strings ...string) Set[string] {
 // Issuers is a set of issuers.
 type Issuers = []string
 
-// Config is a configuration type for verifying JWTs.
-type Config struct {
+// VerifyConfig is a configuration type for verifying JWTs.
+type VerifyConfig struct {
 	InsecureAllowNone bool
 	AllowedAlgorithms []jwa.Algorithm
 	AllowedIssuers    []string
 	AllowedAudiences  []string
-	SecretKey         any // []byte or string
-	PublicKey         any // *rsa.PublicKey or *ecdsa.PublicKey or ed25519.PublicKey
+	AllowedKeys       []any
 
 	// TODO(kent): add more verify options
 }
 
-// ConfigOption is a functional option type for
-// constructing a new Config.
-type ConfigOption = func(*Config) error
+// VerifyOption is a functional option type used to configure
+// the verification requirements for JWTs.
+type VerifyOption = func(*VerifyConfig) error
 
-// AllowInsecureNoneAlgorithm allows the "none" algorithm to be used.
+// WithAllowInsecureNoneAlgorithm allows the "none" algorithm to be used.
 // Users must explicitly enable this option, as it is
 // considered insecure, dangerous, and disabled by default.
 //
@@ -306,116 +305,56 @@ type ConfigOption = func(*Config) error
 //
 // This is not recommended, and should only be used
 // for testing purposes.
-func AllowInsecureNoneAlgorithm(value bool) ConfigOption {
-	return func(vc *Config) error {
+func WithAllowInsecureNoneAlgorithm(value bool) VerifyOption {
+	return func(vc *VerifyConfig) error {
 		vc.InsecureAllowNone = value
 		return nil
 	}
 }
 
-// AllowedIssuers sets the allowed issuers for the JWT.
-func AllowedIssuers(issuers ...string) ConfigOption {
-	return func(vc *Config) error {
+// WithAllowedIssuers sets the allowed issuers for the JWT.
+func WithAllowedIssuers(issuers ...string) VerifyOption {
+	return func(vc *VerifyConfig) error {
 		vc.AllowedIssuers = append(vc.AllowedIssuers, issuers...)
 		return nil
 	}
 }
 
-// AllowedAudiences sets the allowed audiences for the JWT.
-func AllowedAudiences(audiences ...string) ConfigOption {
-	return func(vc *Config) error {
+// WithAllowedAudiences sets the allowed audiences for the JWT.
+func WithAllowedAudiences(audiences ...string) VerifyOption {
+	return func(vc *VerifyConfig) error {
 		vc.AllowedAudiences = append(vc.AllowedAudiences, audiences...)
 		return nil
 	}
 }
 
-// AllowedAlgorithms sets the allowed algorithms for the JWT.
-func AllowedAlgorithms(algs ...jwa.Algorithm) ConfigOption {
-	return func(vc *Config) error {
+// WithAllowedAlgorithms sets the allowed algorithms for the JWT.
+func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
+	return func(vc *VerifyConfig) error {
 		vc.AllowedAlgorithms = append(vc.AllowedAlgorithms, algs...)
 		return nil
 	}
 }
 
-// SecretKey sets the secret key value for HMAC signing.
-func SecretKey(value any) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = value
-		return nil
-	}
-}
-
-// PublicKey sets the public key value for RSA, ECDSA, or EdDSA signing.
-//
-// It is the generic version of RSAPublicKey, ECDSAPublicKey, and EdDSAPublicKey.
-func PublicKey(pubKey any) ConfigOption {
-	return func(c *Config) error {
-		switch pubKey := pubKey.(type) {
-		case *rsa.PublicKey:
-			c.PublicKey = pubKey
-		case *ecdsa.PublicKey:
-			c.PublicKey = pubKey
-		case ed25519.PublicKey:
-			c.PublicKey = pubKey
+// WithKey sets the key value for verifying the JWT, either a
+// shared secret key or public key.
+func WithKey(key any) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		switch key.(type) {
+		case []byte, string, *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
+			// good
 		default:
-			return fmt.Errorf("invalid type %T used for public key", pubKey)
+			return fmt.Errorf("invalid type %T used for JWT verification", key)
 		}
+
+		vc.AllowedKeys = append(vc.AllowedKeys, key)
 		return nil
 	}
 }
 
-// RSAPublicKey sets the public key value for RSA verification.
-func RSAPublicKey(pubKey *rsa.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
-		return nil
-	}
-}
-
-// ECDSAPublicKey sets the public key value for ECDSA verification.
-func ECDSAPublicKey(pubKey *ecdsa.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
-		return nil
-	}
-}
-
-// EdDSAPublicKey sets the public key value for EdDSA verification.
-func EdDSAPublicKey(pubKey ed25519.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
-		return nil
-	}
-}
-
-// PrivateKey sets the private key value for RSA, ECDSA, or EdDSA signing.
-func PrivateKey(privKey any) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// RSAPrivateKey sets the private key value for RSA signing.
-func RSAPrivateKey(privKey *rsa.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// ECDSAPrivateKey sets the private key value for ECDSA signing.
-func ECDSAPrivateKey(privKey *ecdsa.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// EdDSAPrivateKey sets the private key value for EdDSA signing.
-func EdDSAPrivateKey(privKey ed25519.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
+func WithKeys(values ...any) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedKeys = append(vc.AllowedKeys, values...)
 		return nil
 	}
 }
@@ -474,9 +413,9 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 
 // VerifySignature verifies the signature of the token using the
 // given verification configuration options.
-func (t *Token) VerifySignature(veryifyOptions ...ConfigOption) error {
+func (t *Token) VerifySignature(veryifyOptions ...VerifyOption) error {
 	// Set default config values that can be overridden by options.
-	config := &Config{}
+	config := &VerifyConfig{}
 
 	// Apply options.
 	for _, opt := range veryifyOptions {
@@ -519,37 +458,62 @@ func (t *Token) VerifySignature(veryifyOptions ...ConfigOption) error {
 		}
 	}
 
-	if alg == jwa.None && !config.InsecureAllowNone {
-		return fmt.Errorf("requested dangerous algorithm %q is not allowed", alg)
+	// If the "none" algorithm is allowed, then begrudgingly allow it.
+	if config.InsecureAllowNone && alg == jwa.None {
+		return nil
 	}
 
 	// Require a key (symmetric or asymmetric) for all algorithms except "none".
-	if config.SecretKey == nil && config.PublicKey == nil {
+	if len(config.AllowedKeys) == 0 {
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
 	// Verify the signature based on the algorithm.
 	switch alg {
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return t.VerifyHMACSignature(algHash[alg], config.SecretKey)
+		for _, key := range config.AllowedKeys {
+			err := t.VerifyHMACSignature(algHash[alg], key)
+			if err == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
 	case jwa.RS256, jwa.RS384, jwa.RS512:
-		publicKey, ok := config.PublicKey.(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify RSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range config.AllowedKeys {
+			publicKey, ok := key.(*rsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyRSASignature(algHash[alg], publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyRSASignature(algHash[alg], publicKey)
+		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		publicKey, ok := config.PublicKey.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify ECDSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range config.AllowedKeys {
+			publicKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyECDSASignature(algHash[alg], publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyECDSASignature(algHash[alg], publicKey)
+		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
 	case jwa.EdDSA:
-		publicKey, ok := config.PublicKey.(ed25519.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify EdDSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range config.AllowedKeys {
+			publicKey, ok := key.(ed25519.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyEdDSASignature(publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyEdDSASignature(publicKey)
+		return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
 	default:
 		return fmt.Errorf("algorithm %q not implemented or allowed", alg)
 	}
@@ -850,39 +814,7 @@ func (t *Token) EdDSASignature(privateKey ed25519.PrivateKey) ([]byte, error) {
 }
 
 // Sign returns the signature of the token using the given options.
-func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
-	config := &Config{}
-
-	for _, opt := range options {
-		err := opt(config)
-		if err != nil {
-			return nil, fmt.Errorf("sign config option error: %w", err)
-		}
-	}
-
-	if len(config.AllowedIssuers) > 0 {
-		issuer := fmt.Sprintf("%v", t.Claims[Issuer])
-
-		if slices.Contains(config.AllowedIssuers, issuer) {
-			return nil, fmt.Errorf("requested issuer %q is not allowed", issuer)
-		}
-	}
-
-	alg, err := t.Header.Algorithm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to verify alg: %w", err)
-	}
-
-	if len(config.AllowedAlgorithms) > 0 {
-		if !slices.Contains(config.AllowedAlgorithms, alg) {
-			return nil, fmt.Errorf("requested algorithm %q is not allowed", alg)
-		}
-	}
-
-	if alg == jwa.None && !config.InsecureAllowNone {
-		return nil, fmt.Errorf("requested dangerous algorithm %q is not allowed", alg)
-	}
-
+func (t *Token) Sign(key any) ([]byte, error) {
 	typ, err := t.Header.Type()
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT header type: %w", err)
@@ -894,29 +826,34 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 		return nil, fmt.Errorf("type %q not implemented", typ)
 	}
 
+	alg, err := t.Header.Algorithm()
+	if err != nil {
+		return nil, fmt.Errorf("missing JWT header algorithm: %w", err)
+	}
+
 	switch alg {
 	case jwa.HS256:
-		sig, err := t.HMACSignature(crypto.SHA256, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA256, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.HS384:
-		sig, err := t.HMACSignature(crypto.SHA384, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA384, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.HS512:
-		sig, err := t.HMACSignature(crypto.SHA512, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA512, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.ES256:
-		privateKey, ok := config.SecretKey.(*ecdsa.PrivateKey)
+		privateKey, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA256", config.SecretKey)
+			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA256", key)
 		}
 		sig, err := t.ECDSASignature(crypto.SHA256, privateKey)
 		if err != nil {
@@ -924,15 +861,27 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 		}
 		t.Signature = sig
 	case jwa.RS256:
-		privateKey, ok := config.SecretKey.(*rsa.PrivateKey)
+		privateKey, ok := key.(*rsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", config.SecretKey)
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
 		}
 		sig, err := t.RSASignature(crypto.SHA256, privateKey)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
+	case jwa.EdDSA:
+		privateKey, ok := key.(ed25519.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for EdDSA", key)
+		}
+		sig, err := t.EdDSASignature(privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.None:
+		// no signature
 	default:
 		return nil, fmt.Errorf("algorithm %q not implemented", alg)
 	}
@@ -944,7 +893,7 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 
 // Verify is used to verify a signed Token object with the given config options.
 // If this fails for any reason, an error is returned.
-func (t *Token) Verify(opts ...ConfigOption) error {
+func (t *Token) Verify(opts ...VerifyOption) error {
 	err := t.VerifySignature(opts...)
 	if err != nil {
 		return fmt.Errorf("failed to validate token signature: %w", err)

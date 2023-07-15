@@ -5,9 +5,9 @@ JavaScript Object Signing and Encryption ([JOSE](https://datatracker.ietf.org/wg
 ## Example Usage
 
 ```go
-token, _ := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
+raw := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM" 
 
-err := token.VerifySignature(jwt.SecretKey("supersecret"))
+token, _ := jwt.ParseAndVerifyString(raw, jwt.WithKey("supersecret"))
 
 sub, _ := token.Claims.Get(jwt.Subject)
 iat, _ := token.Claims.Get(jwt.IssuedAt)
@@ -27,7 +27,7 @@ token := &jwt.Token{
 	},
 }
 
-signature, err := token.Sign(jwt.SecretKey("supersecret"))
+signature, err := token.Sign("supersecret")
 
 fmt.Println(token)
 // eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9Cg.eyJpYXQiOiIyMDIyLTAyLTE3VDAxOjI5OjQyLjkwMzAzMTY3NFoiLCJpc3MiOiJ0ZXN0Iiwic3ViIjoiMTIzNDU2Nzg5MCJ9Cg.hV13TckmXoXIL1-7gUhZNFvDgGJe7y5EVKpWzmWlvx0
@@ -36,13 +36,13 @@ fmt.Println(token)
 ```go
 token, _ := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
 
-err := token.VerifySignature(jwt.ECDSAPublicKey(publicKey))
+err := token.VerifySignature(ecdsaPublicKey)
 ```
 
 ```go
 token, _ := jwt.ParseString("eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg")
 
-err := token.VerifySignature(jwt.RSAPublicKey(publicKey))
+err := token.VerifySignature(rsaPublicKey)
 ```
 
 ## RFCs
