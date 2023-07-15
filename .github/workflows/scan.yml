@@ -1,0 +1,29 @@
+name: "Scan"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * *"
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Initialize 
+        uses: github/codeql-action/init@v2
+
+      - name: Build
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Analyze 
+        uses: github/codeql-action/analyze@v2
