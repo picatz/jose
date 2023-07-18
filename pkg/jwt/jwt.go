@@ -295,7 +295,7 @@ type VerifyConfig struct {
 
 // VerifyOption is a functional option type used to configure
 // the verification requirements for JWTs.
-type VerifyOption = func(*VerifyConfig) error
+type VerifyOption func(*VerifyConfig) error
 
 // WithAllowInsecureNoneAlgorithm allows the "none" algorithm to be used.
 // Users must explicitly enable this option, as it is
