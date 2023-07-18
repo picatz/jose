@@ -173,28 +173,35 @@ func (t *Token) String() string {
 	return t.computeString()
 }
 
+// Parseable is a type that can be parsed into a JWT,
+// either a string or byte slice.
+type Parseable interface {
+	~string | ~[]byte
+}
+
 // Parse parses a given JWT, and returns a Token or an error
 // if the JWT fails to parse.
-func Parse(input any) (*Token, error) {
-	switch input := input.(type) {
-	case string:
-		return ParseString(input)
-	case []byte:
-		return ParseString(string(input))
-	default:
-		return nil, fmt.Errorf("invalid type %T used for JWT parsing", input)
-	}
+//
+// # Warning
+//
+// This is a low-level function that does not verify the
+// signature of the token. Use ParseAndVerify to parse
+// and verify the signature of a token in one step.
+// Otherwise, use Parse to parse a token, and then
+// use the VerifySignature method to verify the signature.
+func Parse[T Parseable](input T) (*Token, error) {
+	return ParseString(string(input))
 }
 
 // ParseAndVerify parses a given JWT, and verifies the signature
 // using the given verification configuration options.
-func ParseAndVerify(input any, veryifyOptions ...VerifyOption) (*Token, error) {
+func ParseAndVerify[T Parseable](input T, veryifyOptions ...VerifyOption) (*Token, error) {
 	token, err := Parse(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse JWT: %w", err)
 	}
 
-	err = token.VerifySignature(veryifyOptions...)
+	err = token.Verify(veryifyOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify JWT signature: %w", err)
 	}
@@ -204,6 +211,14 @@ func ParseAndVerify(input any, veryifyOptions ...VerifyOption) (*Token, error) {
 
 // ParseString parses a given JWT string, and returns a Token
 // or an error if the JWT fails to parse.
+//
+// # Warning
+//
+// This is a low-level function that does not verify the
+// signature of the token. Use ParseAndVerify to parse
+// and verify the signature of a token in one step.
+// Otherwise, use Parse to parse a token, and then
+// use the VerifySignature method to verify the signature.
 func ParseString(input string) (*Token, error) {
 	token := &Token{}
 
@@ -211,58 +226,56 @@ func ParseString(input string) (*Token, error) {
 
 	fields := strings.Split(input, ".")
 
-	if len(fields) >= 1 {
-		b, err := base64.Decode(fields[0])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
-		}
-		h := jws.Header{}
-		err = json.NewDecoder(bytes.NewReader(b)).Decode(&h)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
-		}
-		token.Header = h
-
-		// ensure using JWA types instead of raw string
-		if _, ok := token.Header[header.Algorithm]; ok {
-			token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
-		}
+	if len(fields) != 3 {
+		return nil, fmt.Errorf("invalid number of fields in JWT: %d", len(fields))
 	}
 
-	if len(fields) >= 2 {
-		b, err := base64.Decode(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode claims base64: %w", err)
-		}
-		claims := ClaimsSet{}
-		err = json.NewDecoder(bytes.NewReader(b)).Decode(&claims)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
-		}
-		token.Claims = claims
+	b, err := base64.Decode(fields[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
+	}
+	h := jws.Header{}
+	err = json.NewDecoder(bytes.NewReader(b)).Decode(&h)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
+	}
+	token.Header = h
 
-		for claimName, claimValue := range token.Claims {
-			// parsing JSON values into an interface can be tricky
-			switch claimName {
-			case IssuedAt, ExpirationTime, NotBefore:
-				switch v := claimValue.(type) {
-				case int64: // good
-				case float64: // ok
-					token.Claims[claimName] = int64(v)
-				default: // bad
-					return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
-				}
+	// ensure using JWA types instead of raw string
+	if _, ok := token.Header[header.Algorithm]; ok {
+		token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
+	}
+
+	b, err = base64.Decode(fields[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
+	}
+	claims := ClaimsSet{}
+	err = json.NewDecoder(bytes.NewReader(b)).Decode(&claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
+	}
+	token.Claims = claims
+
+	for claimName, claimValue := range token.Claims {
+		// parsing JSON values into an interface can be tricky
+		switch claimName {
+		case IssuedAt, ExpirationTime, NotBefore:
+			switch v := claimValue.(type) {
+			case int64: // good
+			case float64: // ok
+				token.Claims[claimName] = int64(v)
+			default: // bad
+				return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
 			}
 		}
 	}
 
-	if len(fields) == 3 {
-		b, err := base64.Decode(fields[2])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode signature base64: %w", err)
-		}
-		token.Signature = b
+	b, err = base64.Decode(fields[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
 	}
+	token.Signature = b
 
 	return token, nil
 }
@@ -284,11 +297,38 @@ type Issuers = []string
 
 // VerifyConfig is a configuration type for verifying JWTs.
 type VerifyConfig struct {
+	// InsecureAllowNone allows the "none" algorithm to be used, which
+	// is considered insecure, dangerous, and disabled by default. It must be
+	// set in addition to being enabled in the allowed algorithms.
 	InsecureAllowNone bool
+
+	// AllowedAlgorithms is a set of allowed algorithms for the JWT.
+	//
+	// If not set, then jwt.DefaultAllowedAlgorithms will be used.
 	AllowedAlgorithms []jwa.Algorithm
-	AllowedIssuers    []string
-	AllowedAudiences  []string
-	AllowedKeys       []any
+
+	// AllowedIssuers is a set of allowed issuers for the JWT.
+	//
+	// If not set, then any issuers are allowed.
+	AllowedIssuers []string
+
+	// AllowedAudiences is a set of allowed audiences for the JWT.
+	//
+	// If not set, then any audiences are allowed.
+	AllowedAudiences []string
+
+	// AllowedKeys is a set of allowed keys for the JWT.
+	//
+	// If not set, then verification will fail if the algorithm
+	// is not "none".
+	AllowedKeys []any
+
+	// Clock is a function that returns the current time.
+	//
+	// This is used to verify the "exp", "nbf", and "iat" claims.
+	//
+	// If not set, then time.Now will be used.
+	Clock func() time.Time
 
 	// TODO(kent): add more verify options
 }
@@ -331,7 +371,7 @@ func WithAllowedAudiences(audiences ...string) VerifyOption {
 // WithAllowedAlgorithms sets the allowed algorithms for the JWT.
 func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedAlgorithms = append(vc.AllowedAlgorithms, algs...)
+		vc.AllowedAlgorithms = algs
 		return nil
 	}
 }
@@ -359,11 +399,31 @@ func WithKeys(values ...any) VerifyOption {
 	}
 }
 
+// WithClock sets the clock function for verifying the JWT.
+func WithClock(clock Clock) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.Clock = clock
+		return nil
+	}
+}
+
+// WithDefaultClock sets the clock function for verifying the JWT
+// to time.Now.
+func WithDefaultClock() VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.Clock = time.Now
+		return nil
+	}
+}
+
+// Clock is type used to represent a function that returns the current time.
+type Clock func() time.Time
+
 // Expired returns true if the token is expired, false otherwise.
 // If an error occurs while checking expiration, it is returned.
 //
 // Only use the boolean value if error is nil.
-func (t *Token) Expired() (bool, error) {
+func (t *Token) Expired(clock Clock) (bool, error) {
 	expValue, ok := t.Claims[ExpirationTime]
 	if !ok {
 		return false, nil
@@ -374,7 +434,7 @@ func (t *Token) Expired() (bool, error) {
 	}
 	exp := time.Unix(expInt, 0)
 
-	return exp.Before(time.Now()), nil
+	return exp.Before(clock()), nil
 }
 
 // Expires returns true if the token has an expiration time claim,
@@ -413,65 +473,30 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 
 // VerifySignature verifies the signature of the token using the
 // given verification configuration options.
-func (t *Token) VerifySignature(veryifyOptions ...VerifyOption) error {
-	// Set default config values that can be overridden by options.
-	config := &VerifyConfig{}
-
-	// Apply options.
-	for _, opt := range veryifyOptions {
-		err := opt(config)
-		if err != nil {
-			return fmt.Errorf("verify signature option error: %w", err)
-		}
-	}
-
-	// If the allowed issuers is empty, then any issuer is allowed.
-	//
-	// Otherwise, the issuer must be in the allowed issuers map.
-	if config.AllowedIssuers != nil {
-		issuer := fmt.Sprintf("%s", t.Claims[Issuer])
-
-		if !slices.Contains(config.AllowedIssuers, issuer) {
-			return fmt.Errorf("requested issuer %q is not allowed", issuer)
-		}
-	}
-
-	// If the allowed audiences is empty, then any audience is allowed.
-	//
-	// Otherwise, the audience must be in the allowed audiences map.
-	if config.AllowedAudiences != nil {
-		audience := fmt.Sprintf("%s", t.Claims[Audience])
-
-		if !slices.Contains(config.AllowedAudiences, audience) {
-			return fmt.Errorf("requested audience %q is not allowed", audience)
-		}
-	}
-
+//
+// # Warning
+//
+// This only verifies the signature, and does not verify any
+// other claims, such as expiration time, issuer, audience, etc.
+func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
 		return fmt.Errorf("failed to verify alg: %w", err)
 	}
 
-	if len(config.AllowedAlgorithms) > 0 {
-		if !slices.Contains(config.AllowedAlgorithms, alg) {
-			return fmt.Errorf("requested algorithm %q is not allowed", alg)
-		}
-	}
-
-	// If the "none" algorithm is allowed, then begrudgingly allow it.
-	if config.InsecureAllowNone && alg == jwa.None {
-		return nil
+	if !slices.Contains(allowedAlgs, alg) {
+		return fmt.Errorf("requested algorithm %q is not allowed", alg)
 	}
 
 	// Require a key (symmetric or asymmetric) for all algorithms except "none".
-	if len(config.AllowedKeys) == 0 {
+	if len(allowedKeys) == 0 && !slices.Contains(allowedAlgs, jwa.None) {
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
 	// Verify the signature based on the algorithm.
 	switch alg {
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		for _, key := range config.AllowedKeys {
+		for _, key := range allowedKeys {
 			err := t.VerifyHMACSignature(algHash[alg], key)
 			if err == nil {
 				return nil
@@ -479,7 +504,7 @@ func (t *Token) VerifySignature(veryifyOptions ...VerifyOption) error {
 		}
 		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
 	case jwa.RS256, jwa.RS384, jwa.RS512:
-		for _, key := range config.AllowedKeys {
+		for _, key := range allowedKeys {
 			publicKey, ok := key.(*rsa.PublicKey)
 			if !ok {
 				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
@@ -491,7 +516,7 @@ func (t *Token) VerifySignature(veryifyOptions ...VerifyOption) error {
 		}
 		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		for _, key := range config.AllowedKeys {
+		for _, key := range allowedKeys {
 			publicKey, ok := key.(*ecdsa.PublicKey)
 			if !ok {
 				return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
@@ -503,7 +528,7 @@ func (t *Token) VerifySignature(veryifyOptions ...VerifyOption) error {
 		}
 		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
 	case jwa.EdDSA:
-		for _, key := range config.AllowedKeys {
+		for _, key := range allowedKeys {
 			publicKey, ok := key.(ed25519.PublicKey)
 			if !ok {
 				return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
@@ -891,15 +916,72 @@ func (t *Token) Sign(key any) ([]byte, error) {
 	return t.Signature, nil
 }
 
+var defaultAllowedAlogrithms = []jwa.Algorithm{
+	jwa.RS256, jwa.RS384, jwa.RS512,
+	jwa.ES256, jwa.ES384, jwa.ES512,
+	jwa.HS256, jwa.HS384, jwa.HS512,
+	jwa.PS256, jwa.PS384, jwa.PS512,
+	jwa.EdDSA,
+}
+
+func DefaultAllowedAlogrithms() []jwa.Algorithm {
+	return defaultAllowedAlogrithms
+}
+
 // Verify is used to verify a signed Token object with the given config options.
 // If this fails for any reason, an error is returned.
 func (t *Token) Verify(opts ...VerifyOption) error {
-	err := t.VerifySignature(opts...)
+	// Set default config values that can be overridden by options.
+	config := &VerifyConfig{
+		InsecureAllowNone: false,
+		AllowedAlgorithms: []jwa.Algorithm{
+			jwa.RS256, jwa.RS384, jwa.RS512,
+			jwa.ES256, jwa.ES384, jwa.ES512,
+			jwa.HS256, jwa.HS384, jwa.HS512,
+			jwa.PS256, jwa.PS384, jwa.PS512,
+			jwa.EdDSA,
+		},
+		Clock: time.Now,
+	}
+
+	// Apply options.
+	for _, opt := range opts {
+		err := opt(config)
+		if err != nil {
+			return fmt.Errorf("verify option error: %w", err)
+		}
+	}
+
+	// Verify the signature of the token, which may be "none" if the
+	// explictly allowed "none" algorithm is set in the config.
+	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys...)
 	if err != nil {
 		return fmt.Errorf("failed to validate token signature: %w", err)
 	}
 
-	expired, err := t.Expired()
+	// If the allowed issuers is empty, then any issuer is allowed.
+	//
+	// Otherwise, the issuer must be in the allowed issuers map.
+	if config.AllowedIssuers != nil {
+		issuer := fmt.Sprintf("%s", t.Claims[Issuer])
+
+		if !slices.Contains(config.AllowedIssuers, issuer) {
+			return fmt.Errorf("requested issuer %q is not allowed", issuer)
+		}
+	}
+
+	// If the allowed audiences is empty, then any audience is allowed.
+	//
+	// Otherwise, the audience must be in the allowed audiences map.
+	if config.AllowedAudiences != nil {
+		audience := fmt.Sprintf("%s", t.Claims[Audience])
+
+		if !slices.Contains(config.AllowedAudiences, audience) {
+			return fmt.Errorf("requested audience %q is not allowed", audience)
+		}
+	}
+
+	expired, err := t.Expired(time.Now)
 	if err != nil {
 		return fmt.Errorf("failed to validate token expiration: %w", err)
 	}

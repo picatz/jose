@@ -318,7 +318,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyECDSASignature(crypto.SHA256, testECDSAPublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(WithKey(testECDSAPublicKey))
+				err = token.Verify(WithKey(testECDSAPublicKey))
 				require.NoError(t, err)
 			},
 		},
@@ -333,7 +333,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())
 
-				err := token.VerifySignature(WithKey(testECDSAPublicKey), WithAllowedAlgorithms(jwa.RS256))
+				err := token.Verify(WithKey(testECDSAPublicKey), WithAllowedAlgorithms(jwa.RS256))
 				require.Error(t, err)
 			},
 		},
@@ -359,33 +359,19 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyRSASignature(crypto.SHA256, testRSASHA256PublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(WithKey(testRSASHA256PublicKey))
+				err = token.Verify(WithKey(testRSASHA256PublicKey))
 				require.NoError(t, err)
 			},
 		},
 		{
 			Name:  "JOSE header only",
 			Input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9`,
-			Require: func(t *testing.T, token *Token) {
-				require.Equal(t, jwa.HS256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
-				require.Empty(t, token.Claims)
-				require.Empty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
-			},
+			Error: true, // too short
 		},
 		{
 			Name:  "JOSE header with claims",
 			Input: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ`,
-			Require: func(t *testing.T, token *Token) {
-				require.Equal(t, jwa.HS256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
-				require.Equal(t, int64(1300819380), token.Claims[ExpirationTime])
-				require.Equal(t, "joe", token.Claims[Issuer])
-				require.Equal(t, true, token.Claims["http://example.com/is_root"])
-				require.Empty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
-			},
+			Error: true, // no signature
 		},
 		{
 			Name:  "JOSE header with claims and HMAC SHA256 signature",
@@ -407,8 +393,9 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyHMACSignature(crypto.SHA256, testHMACSecretKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(WithKey(testHMACSecretKey), WithAllowedAlgorithms(jwa.HS256))
-				require.NoError(t, err)
+				// Token is expired
+				err = token.Verify(WithKey(testHMACSecretKey), WithAllowedAlgorithms(jwa.HS256))
+				require.Error(t, err)
 			},
 		},
 		{
@@ -431,7 +418,7 @@ func TestParseStringAndVerify(t *testing.T) {
 				err = token.VerifyEdDSASignature(testEdDSAPublicKey)
 				require.NoError(t, err)
 
-				err = token.VerifySignature(WithKey(testEdDSAPublicKey), WithAllowedAlgorithms(jwa.EdDSA))
+				err = token.Verify(WithKey(testEdDSAPublicKey), WithAllowedAlgorithms(jwa.EdDSA))
 				require.NoError(t, err)
 			},
 		},
@@ -470,12 +457,6 @@ func TestSignJWT(t *testing.T) {
 	require.Equal(t, token.Signature, sig)
 }
 
-func defaultAllowedAlogrithms() []jwa.Algorithm {
-	return []jwa.Algorithm{
-		jwa.RS256, jwa.ES256,
-	}
-}
-
 func TestNew(t *testing.T) {
 	tests := []struct {
 		Name                    string
@@ -497,7 +478,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              nil,
 			Error:                   true,
-			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
+			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
 		},
 		{
 			Name: "RSA SHA256",
@@ -510,7 +491,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              testRSASHA256PrviateKey,
 			VerifyKey:               testRSASHA256PublicKey,
-			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
+			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
 		},
 		{
 			Name: "ECDSA SHA256",
@@ -523,7 +504,7 @@ func TestNew(t *testing.T) {
 			},
 			SigningKey:              testECDSAPrivateKey,
 			VerifyKey:               testECDSAPublicKey,
-			AllowedVerifyAlgorithms: defaultAllowedAlogrithms(),
+			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
 		},
 		{
 			Name: "HMAC SHA256",
@@ -558,13 +539,13 @@ func TestNew(t *testing.T) {
 					symEnc, err := token.Header.SymetricAlgorithm()
 					require.NoError(t, err)
 					if symEnc {
-						err = token.VerifySignature(
+						err = token.Verify(
 							WithKey(test.VerifyKey),
 							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
 						require.NoError(t, err)
 					} else { // asym
-						err = token.VerifySignature(
+						err = token.Verify(
 							WithKey(test.VerifyKey),
 							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
 						)
@@ -648,7 +629,7 @@ func TestNewExpired(t *testing.T) {
 				require.False(t, expires)
 			}
 
-			expired, err := token.Expired()
+			expired, err := token.Expired(time.Now)
 			require.NoError(t, err)
 
 			if test.Expired {
