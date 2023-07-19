@@ -207,6 +207,12 @@ type VerifyKey interface {
 	PublicKey | SymmetricKey
 }
 
+// SigningKey is a type that can be used to sign a JWT using
+// either a symmetric or asymmetric algorithm.
+type SigningKey interface {
+	PrivateKey | SymmetricKey
+}
+
 // Parseable is a type that can be parsed into a JWT,
 // either a string or byte slice.
 type Parseable interface {
