@@ -399,9 +399,10 @@ func WithKey(key any) VerifyOption {
 	}
 }
 
+// WithKeys sets the allowed keys for the JWT.
 func WithKeys(values ...any) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedKeys = append(vc.AllowedKeys, values...)
+		vc.AllowedKeys = values
 		return nil
 	}
 }
