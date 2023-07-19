@@ -1078,3 +1078,9 @@ func FromHTTPAuthorizationHeader(r *http.Request) (string, error) {
 	return parts[1], nil
 }
 
+// HTTPHeaderValue is a type that can be used as a value when setting
+// an HTTP request header.
+type HTTPHeaderValue interface {
+	string | Token
+}
+
