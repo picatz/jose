@@ -195,6 +195,12 @@ type PublicKey interface {
 	*rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
 }
 
+// SymmetricKey is a type that can be used to sign or verify a JWT using
+// a symmetric algorithm, such as HMAC.
+type SymmetricKey interface {
+	[]byte | string
+}
+
 // Parseable is a type that can be parsed into a JWT,
 // either a string or byte slice.
 type Parseable interface {
