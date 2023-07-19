@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
 	"strings"
 	"time"
 
@@ -1084,3 +1085,11 @@ type HTTPHeaderValue interface {
 	string | Token
 }
 
+// SetHTTPAuthorizationHeader sets the Authorization header of an HTTP request
+// to the given JWT. The JWT is prefixed with "Bearer ", as required by the
+// HTTP Authorization header specification.
+//
+// https://tools.ietf.org/html/rfc6750#section-2.1
+func SetHTTPAuthorizationHeader[T HTTPHeaderValue](r *http.Request, jwt T) {
+	r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
+}
