@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -1092,4 +1093,30 @@ type HTTPHeaderValue interface {
 // https://tools.ietf.org/html/rfc6750#section-2.1
 func SetHTTPAuthorizationHeader[T HTTPHeaderValue](r *http.Request, jwt T) {
 	r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
+}
+
+// contextKey is a type used to store values in a context object.
+//
+// We use this type to avoid collisions with other packages that
+// may also use context values in the same context.
+type contextKey string
+
+const (
+	// ContextKey is the key used to store the JWT in the context.
+	ContextKey contextKey = "jwt"
+)
+
+// FromContext extracts a JWT from the given context. If the JWT is not
+// in the context, then nil is returned.
+func FromContext(ctx context.Context) *Token {
+	token, ok := ctx.Value(ContextKey).(*Token)
+	if !ok {
+		return nil
+	}
+	return token
+}
+
+// WithContext sets the JWT in the given context.
+func WithContext(ctx context.Context, token *Token) context.Context {
+	return context.WithValue(ctx, ContextKey, token)
 }
