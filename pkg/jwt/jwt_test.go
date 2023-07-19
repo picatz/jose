@@ -535,23 +535,29 @@ func TestNew(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, token)
 
+				verifyOpts := []VerifyOption{
+					WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
+				}
+
 				if test.VerifyKey != nil {
-					symEnc, err := token.Header.SymetricAlgorithm()
-					require.NoError(t, err)
-					if symEnc {
-						err = token.Verify(
-							WithKey(test.VerifyKey),
-							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
-						)
-						require.NoError(t, err)
-					} else { // asym
-						err = token.Verify(
-							WithKey(test.VerifyKey),
-							WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
-						)
-						require.NoError(t, err)
+					switch verifyKey := test.VerifyKey.(type) {
+					case *rsa.PublicKey:
+						verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					case *ecdsa.PublicKey:
+						verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					case ed25519.PublicKey:
+						verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					case []byte:
+						verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					case string:
+						verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					default:
+						t.Fatalf("unsupported verify key type: %T", verifyKey)
 					}
 				}
+
+				err = token.Verify(verifyOpts...)
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -714,7 +720,26 @@ func TestVerify(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, token)
 
-			err = token.Verify(WithKey(test.VerifyKey))
+			verifyOpts := []VerifyOption{}
+
+			if test.VerifyKey != nil {
+				switch verifyKey := test.VerifyKey.(type) {
+				case *rsa.PublicKey:
+					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+				case *ecdsa.PublicKey:
+					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+				case ed25519.PublicKey:
+					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+				case []byte:
+					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+				case string:
+					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+				default:
+					t.Fatalf("unsupported verify key type: %T", verifyKey)
+				}
+			}
+
+			err = token.Verify(verifyOpts...)
 			if test.Error {
 				require.Error(t, err)
 			} else {

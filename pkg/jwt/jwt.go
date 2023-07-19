@@ -416,17 +416,13 @@ func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
 	}
 }
 
-// WithKey sets the key value for verifying the JWT, either a
-// shared secret key or public key.
-func WithKey(key any) VerifyOption {
+// WithKey appends a key to the set of allowed keys for the JWT.
+//
+// This is the preferred way to add a key to the set of allowed keys,
+// because it will ensure that the givne key is of the correct type
+// at compile time.
+func WithKey[T VerifyKey](key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		switch key.(type) {
-		case []byte, string, *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-			// good
-		default:
-			return fmt.Errorf("invalid type %T used for JWT verification", key)
-		}
-
 		vc.AllowedKeys = append(vc.AllowedKeys, key)
 		return nil
 	}
