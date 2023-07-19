@@ -13,7 +13,7 @@ import (
 func main() {
 	token, err := jwt.New(
 		header.Parameters{
-			header.Type:      header.TypeJWT,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		}, jwt.ClaimsSet{
 			"sub":  "1234567890",

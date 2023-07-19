@@ -121,8 +121,12 @@ func New(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
 		}
 	}
 
-	// Header type parameter "typ" is always "JWT".
-	params[header.Type] = header.TypeJWT
+	// Ensure the "typ" header parameter is set to "JWT", as it is required.
+	if _, ok := params[header.Type]; !ok {
+		params[header.Type] = Type
+	} else if params[header.Type] != Type {
+		return nil, fmt.Errorf("header type %q is not supported", params[header.Type])
+	}
 
 	// Create a token, in preparation to sign it.
 	token := &Token{
@@ -882,10 +886,8 @@ func (t *Token) Sign(key any) ([]byte, error) {
 		return nil, fmt.Errorf("invalid JWT header type: %w", err)
 	}
 
-	switch typ {
-	case header.TypeJWT:
-	default:
-		return nil, fmt.Errorf("type %q not implemented", typ)
+	if typ != Type {
+		return nil, fmt.Errorf("invalid JWT header type: %q", typ)
 	}
 
 	alg, err := t.Header.Algorithm()

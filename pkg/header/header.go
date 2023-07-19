@@ -109,19 +109,6 @@ const (
 	Zip Registered = "zip"
 )
 
-// TypeJWT "JWT" is the media type used by JWS and JWE to represent
-// a JSON object using JWS or JWE JSON Serialization.
-//
-// # Example
-//
-//	header := header.Parameters{
-//		header.Type:      header.TypeJWT,
-//		header.Algorithm: jwa.HS256,
-//	}
-//
-// https://www.rfc-editor.org/rfc/rfc7515.html#section-3.3
-const TypeJWT = "JWT"
-
 // Parameters is a JSON object containing the parameters describing
 // the cryptographic operations and parameters employed.
 //

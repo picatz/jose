@@ -263,7 +263,7 @@ MC4CAQAwBQYDK2VwBCIEIFdZWoDdFny5SMnP9Fyfr8bafi/B527EVZh8JJjDTIFO
 func TestTokenString(t *testing.T) {
 	token := &Token{
 		Header: jws.Header{
-			header.Type:      header.TypeJWT,
+			header.Type:      Type,
 			header.Algorithm: jwa.HS256,
 		},
 		Claims: ClaimsSet{
@@ -303,7 +303,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			Error: false,
 			Require: func(t *testing.T, token *Token) {
 				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
+				require.Equal(t, Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())
@@ -328,7 +328,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			Error: false,
 			Require: func(t *testing.T, token *Token) {
 				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
+				require.Equal(t, Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())
@@ -343,7 +343,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			Error: false,
 			Require: func(t *testing.T, token *Token) {
 				require.Equal(t, jwa.RS256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
+				require.Equal(t, Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())
@@ -378,7 +378,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			Input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`,
 			Require: func(t *testing.T, token *Token) {
 				require.Equal(t, jwa.HS256, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
+				require.Equal(t, Type, token.Header[header.Type])
 				require.Equal(t, int64(1300819380), token.Claims[ExpirationTime])
 				require.Equal(t, "joe", token.Claims[Issuer])
 				require.Equal(t, true, token.Claims["http://example.com/is_root"])
@@ -404,7 +404,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			Error: false,
 			Require: func(t *testing.T, token *Token) {
 				require.Equal(t, jwa.EdDSA, token.Header[header.Algorithm])
-				require.Equal(t, header.TypeJWT, token.Header[header.Type])
+				require.Equal(t, Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
 				require.Equal(t, token.raw, token.String())

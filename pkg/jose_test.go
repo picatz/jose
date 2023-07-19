@@ -46,7 +46,7 @@ func TestExampleJWTParseStringAndVerifySignatureHS256(t *testing.T) {
 
 	typ, err := token.Header.Type()
 	require.NoError(t, err)
-	require.Equal(t, header.TypeJWT, typ)
+	require.Equal(t, jwt.Type, typ)
 
 	claimNames := token.Claims.Names()
 	require.Equal(t, []jwt.ClaimName{"sub", "name", "iat"}, claimNames)
@@ -67,7 +67,7 @@ func TestExampleJWTParseStringAndVerifySignatureHS256(t *testing.T) {
 func TestExampleCreateJWTAndSignWithHS256(t *testing.T) {
 	token := &jwt.Token{
 		Header: jws.Header{
-			header.Type:      header.TypeJWT,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		},
 		Claims: jwt.ClaimsSet{
