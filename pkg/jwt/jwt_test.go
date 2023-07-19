@@ -260,6 +260,30 @@ MC4CAQAwBQYDK2VwBCIEIFdZWoDdFny5SMnP9Fyfr8bafi/B527EVZh8JJjDTIFO
 	}()
 )
 
+func newToken(t *testing.T, params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
+	var (
+		token *Token
+		err   error
+	)
+
+	switch key := key.(type) {
+	case *rsa.PrivateKey:
+		token, err = New(params, claims, key)
+	case *ecdsa.PrivateKey:
+		token, err = New(params, claims, key)
+	case ed25519.PrivateKey:
+		token, err = New(params, claims, key)
+	case []byte:
+		token, err = New(params, claims, key)
+	case string:
+		token, err = New(params, claims, key)
+	default:
+		return nil, fmt.Errorf("unsupported signing key type: %T", key)
+	}
+
+	return token, err
+}
+
 func TestTokenString(t *testing.T) {
 	token := &Token{
 		Header: jws.Header{
@@ -468,7 +492,7 @@ func TestNew(t *testing.T) {
 		AllowedVerifyAlgorithms []jwa.Algorithm
 	}{
 		{
-			Name: "no signing key",
+			Name: "RSA SHA256",
 			Header: header.Parameters{
 				header.Type:      "JWT",
 				header.Algorithm: jwa.RS256,
@@ -476,15 +500,15 @@ func TestNew(t *testing.T) {
 			Claims: ClaimsSet{
 				Subject: "test",
 			},
-			SigningKey:              nil,
-			Error:                   true,
+			SigningKey:              testRSASHA256PrviateKey,
+			VerifyKey:               testRSASHA256PublicKey,
 			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
 		},
 		{
-			Name: "RSA SHA256",
+			Name: "RSA PSS SHA256",
 			Header: header.Parameters{
 				header.Type:      "JWT",
-				header.Algorithm: jwa.RS256,
+				header.Algorithm: jwa.PS256,
 			},
 			Claims: ClaimsSet{
 				Subject: "test",
@@ -523,11 +547,8 @@ func TestNew(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			token, err := New(
-				test.Header,
-				test.Claims,
-				test.SigningKey,
-			)
+			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
+
 			if test.Error {
 				require.Error(t, err)
 				require.Nil(t, token)
@@ -622,7 +643,7 @@ func TestNewExpired(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			token, err := New(test.Header, test.Claims, test.SigningKey)
+			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
 			require.NoError(t, err)
 			require.NotNil(t, token)
 
@@ -716,7 +737,7 @@ func TestVerify(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.Name, func(t *testing.T) {
-			token, err := New(test.Header, test.Claims, test.SigningKey)
+			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
 			require.NoError(t, err)
 			require.NotNil(t, token)
 

@@ -80,11 +80,13 @@ type Token struct {
 // The given key can be a symmetric or asymmetric (private) key. The type for this
 // argument depends on the algorithm "alg" defined in the header.
 //
-// Algorithm(s) to Supported Key Type(s):
+// Example algorithm(s) to Supported Key Type(s):
 //   - HS256, HS384, HS512: []byte or string
-//   - RS256: *rsa.PrivateKey
-//   - ES256: *ecdsa.PrivateKey
-func New(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
+//   - RS256, RS384, RS512: *rsa.PrivateKey
+//   - PS256, PS384, PS512: *rsa.PrivateKey
+//   - ES256, ES384, ES512: *ecdsa.PrivateKey
+//   - EdDSA: ed25519.PrivateKey
+func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Token, error) {
 	// Given params set cannot be empty.
 	if len(params) == 0 {
 		return nil, fmt.Errorf("cannot create token with empty header parameters")
@@ -362,11 +364,12 @@ type VerifyConfig struct {
 	// If not set, then any audiences are allowed.
 	AllowedAudiences []string
 
-	// AllowedKeys is a set of allowed keys for the JWT.
+	// AllowedKeys is a set of allowed keys for the JWT keyed by
+	// the corresponding "kid" header parameter.
 	//
 	// If not set, then verification will fail if the algorithm
 	// is not "none".
-	AllowedKeys []any
+	AllowedKeys map[string]any
 
 	// Clock is a function that returns the current time.
 	//
@@ -421,22 +424,46 @@ func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
 	}
 }
 
-// WithKey appends a key to the set of allowed keys for the JWT.
+// WithKey appends a key to the set of allowed keys for the JWT using a
+// randomly generated key ID.
 //
 // This is the preferred way to add a key to the set of allowed keys,
 // because it will ensure that the givne key is of the correct type
 // at compile time.
 func WithKey[T VerifyKey](key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedKeys = append(vc.AllowedKeys, key)
+		if vc.AllowedKeys == nil {
+			vc.AllowedKeys = make(map[string]any)
+		}
+
+		// generate a random key ID
+		kid := make([]byte, 64)
+		_, err := rand.Read(kid)
+		if err != nil {
+			return fmt.Errorf("failed to generate random key ID: %w", err)
+		}
+
+		// convert to hex string
+		kidStr := fmt.Sprintf("%x", kid)
+
+		// add key to set of allowed keys
+		vc.AllowedKeys[kidStr] = key
+
 		return nil
 	}
 }
 
-// WithKeys sets the allowed keys for the JWT.
-func WithKeys(values ...any) VerifyOption {
+// WithIdentifiableKey adds a key by ID to the set of allowed keys for the JWT.
+//
+// This is the preferred way to add a key to the set of allowed keys,
+// because it will ensure that the givne key is of the correct type
+// at compile time.
+func WithIdentifiableKey[T VerifyKey](kid string, key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedKeys = values
+		if vc.AllowedKeys == nil {
+			vc.AllowedKeys = make(map[string]any)
+		}
+		vc.AllowedKeys[kid] = key
 		return nil
 	}
 }
@@ -520,7 +547,7 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 //
 // This only verifies the signature, and does not verify any
 // other claims, such as expiration time, issuer, audience, etc.
-func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error {
+func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys map[string]any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
 		return fmt.Errorf("failed to verify alg: %w", err)
@@ -535,9 +562,27 @@ func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error 
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
+	// get the key based on "kid" header parameter
+	keyID, err := GetCalimValue[string](t.Claims, header.KeyID)
+	if err != nil {
+		// if no "kid" header parameter, then get the first key
+		// in the allowed keys map
+		for allowedKeyID := range allowedKeys {
+			keyID = allowedKeyID
+			break
+		}
+	}
+
 	// Verify the signature based on the algorithm.
 	switch alg {
 	case jwa.HS256, jwa.HS384, jwa.HS512:
+		if keyID != "" {
+			if key, ok := allowedKeys[keyID]; ok {
+				return t.VerifyHMACSignature(algHash[alg], key)
+			}
+			return fmt.Errorf("failed to verify HMAC signature using key %q", keyID)
+		}
+
 		for _, key := range allowedKeys {
 			err := t.VerifyHMACSignature(algHash[alg], key)
 			if err == nil {
@@ -546,6 +591,19 @@ func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error 
 		}
 		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
 	case jwa.RS256, jwa.RS384, jwa.RS512:
+		if keyID != "" {
+			if key, ok := allowedKeys[keyID]; ok {
+				publicKey, ok := key.(*rsa.PublicKey)
+				if !ok {
+					return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+				}
+
+				return t.VerifyRSASignature(algHash[alg], publicKey)
+			}
+
+			return fmt.Errorf("failed to verify RSA signature using key %q", keyID)
+		}
+
 		for _, key := range allowedKeys {
 			publicKey, ok := key.(*rsa.PublicKey)
 			if !ok {
@@ -557,7 +615,45 @@ func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error 
 			}
 		}
 		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
+	case jwa.PS256, jwa.PS384, jwa.PS512:
+		if keyID != "" {
+			if key, ok := allowedKeys[keyID]; ok {
+				publicKey, ok := key.(*rsa.PublicKey)
+				if !ok {
+					return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+				}
+
+				return t.VerifyRSAPSSSignature(algHash[alg], publicKey)
+			}
+
+			return fmt.Errorf("failed to verify RSA signature using key %q", keyID)
+		}
+
+		for _, key := range allowedKeys {
+			publicKey, ok := key.(*rsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyRSAPSSSignature(algHash[alg], publicKey)
+			if err == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
 	case jwa.ES256, jwa.ES384, jwa.ES512:
+		if keyID != "" {
+			if key, ok := allowedKeys[keyID]; ok {
+				publicKey, ok := key.(*ecdsa.PublicKey)
+				if !ok {
+					return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
+				}
+
+				return t.VerifyECDSASignature(algHash[alg], publicKey)
+			}
+
+			return fmt.Errorf("failed to verify ECDSA signature using key %q", keyID)
+		}
+
 		for _, key := range allowedKeys {
 			publicKey, ok := key.(*ecdsa.PublicKey)
 			if !ok {
@@ -570,6 +666,19 @@ func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error 
 		}
 		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
 	case jwa.EdDSA:
+		if keyID != "" {
+			if key, ok := allowedKeys[keyID]; ok {
+				publicKey, ok := key.(ed25519.PublicKey)
+				if !ok {
+					return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
+				}
+
+				return t.VerifyEdDSASignature(publicKey)
+			}
+
+			return fmt.Errorf("failed to verify EdDSA signature using key %q", keyID)
+		}
+
 		for _, key := range allowedKeys {
 			publicKey, ok := key.(ed25519.PublicKey)
 			if !ok {
@@ -709,6 +818,62 @@ func (t *Token) RSASignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]by
 	h.Write([]byte(data))
 
 	return rsa.SignPKCS1v15(rand.Reader, privateKey, hash, h.Sum(nil))
+}
+
+// RSAPSSSignature returns the RSA-PSS signature of the token using the given hash
+// and private key.
+//
+// This is similar to RSASignature, but uses the RSA-PSS algorithm, which
+// is probabilistic, and therefore, the signature will be different each time.
+func (t *Token) RSAPSSSignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]byte, error) {
+	if !hash.Available() {
+		return nil, fmt.Errorf("requested hash is not available")
+	}
+
+	if privateKey == nil {
+		return nil, fmt.Errorf("no RSA private key")
+	}
+
+	if len(t.raw) == 0 {
+		t.raw = t.String()
+	}
+
+	parts := strings.Split(t.raw, ".")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
+	}
+
+	data := strings.Join(parts[0:2], ".")
+	h := hash.New()
+	h.Write([]byte(data))
+
+	return rsa.SignPSS(rand.Reader, privateKey, hash, h.Sum(nil), nil)
+}
+
+// VerifyRSAPSSSignature verifies the RSA-PSS signature of the token using the
+// given hash and public key.
+//
+// This is similar to VerifyRSASignature, but uses the RSA-PSS algorithm, which
+// is probabilistic, and therefore, the signature will be different each time.
+func (t *Token) VerifyRSAPSSSignature(hash crypto.Hash, publicKey *rsa.PublicKey) error {
+	if !hash.Available() {
+		return fmt.Errorf("requested hash is not available")
+	}
+
+	if publicKey == nil {
+		return fmt.Errorf("no RSA public key")
+	}
+
+	parts, err := splitToken(t.raw)
+	if err != nil {
+		return fmt.Errorf("failed to split token: %w", err)
+	}
+
+	data := strings.Join(parts[0:2], ".")
+	h := hash.New()
+	h.Write([]byte(data))
+
+	return rsa.VerifyPSS(publicKey, hash, h.Sum(nil), t.Signature, nil)
 }
 
 // VerifyECDSASignature verifies the ECDSA signature of the token using the
@@ -925,12 +1090,82 @@ func (t *Token) Sign(key any) ([]byte, error) {
 			return nil, err
 		}
 		t.Signature = sig
+	case jwa.ES384:
+		privateKey, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA384", key)
+		}
+		sig, err := t.ECDSASignature(crypto.SHA384, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.ES512:
+		privateKey, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA512", key)
+		}
+		sig, err := t.ECDSASignature(crypto.SHA512, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.PS256:
+		privateKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
+		}
+		sig, err := t.RSAPSSSignature(crypto.SHA256, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.PS384:
+		privateKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA384", key)
+		}
+		sig, err := t.RSAPSSSignature(crypto.SHA384, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.PS512:
+		privateKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA512", key)
+		}
+		sig, err := t.RSAPSSSignature(crypto.SHA512, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
 	case jwa.RS256:
 		privateKey, ok := key.(*rsa.PrivateKey)
 		if !ok {
 			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
 		}
 		sig, err := t.RSASignature(crypto.SHA256, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.RS384:
+		privateKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA384", key)
+		}
+		sig, err := t.RSASignature(crypto.SHA384, privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.RS512:
+		privateKey, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA512", key)
+		}
+		sig, err := t.RSASignature(crypto.SHA512, privateKey)
 		if err != nil {
 			return nil, err
 		}
@@ -958,9 +1193,9 @@ func (t *Token) Sign(key any) ([]byte, error) {
 
 var defaultAllowedAlogrithms = []jwa.Algorithm{
 	jwa.RS256, jwa.RS384, jwa.RS512,
+	jwa.PS256, jwa.PS384, jwa.PS512,
 	jwa.ES256, jwa.ES384, jwa.ES512,
 	jwa.HS256, jwa.HS384, jwa.HS512,
-	jwa.PS256, jwa.PS384, jwa.PS512,
 	jwa.EdDSA,
 }
 
@@ -976,9 +1211,9 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		InsecureAllowNone: false,
 		AllowedAlgorithms: []jwa.Algorithm{
 			jwa.RS256, jwa.RS384, jwa.RS512,
+			jwa.PS256, jwa.PS384, jwa.PS512,
 			jwa.ES256, jwa.ES384, jwa.ES512,
 			jwa.HS256, jwa.HS384, jwa.HS512,
-			jwa.PS256, jwa.PS384, jwa.PS512,
 			jwa.EdDSA,
 		},
 		Clock: time.Now,
@@ -994,7 +1229,7 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 
 	// Verify the signature of the token, which may be "none" if the
 	// explictly allowed "none" algorithm is set in the config.
-	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys...)
+	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys)
 	if err != nil {
 		return fmt.Errorf("failed to validate token signature: %w", err)
 	}
