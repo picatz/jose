@@ -27,3 +27,14 @@ jobs:
 
       - name: Analyze 
         uses: github/codeql-action/analyze@v2
+  osv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Scan
+        uses: google/osv-scanner@main
+        with:
+          version: "latest"
