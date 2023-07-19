@@ -12,6 +12,8 @@ import (
 // There are three classes of Header Parameter names: Registered Header
 // Parameter names, Public Header Parameter names, and Private Header
 // Parameter names.
+//
+// https://datatracker.ietf.org/doc/html/rfc7515#section-4
 type (
 	ParamaterName = string
 
