@@ -180,6 +180,15 @@ func (t *Token) String() string {
 	return t.computeString()
 }
 
+// PrivateKey is a type that can be used to sign a JWT,
+// such as a *rsa.PrivateKey or *ecdsa.PrivateKey.
+//
+// This may be a shared secret key, such as a []byte or string, but
+// this is not recommended.
+type PrivateKey interface {
+	*rsa.PrivateKey | *ecdsa.PrivateKey | ed25519.PrivateKey | []byte | string
+}
+
 // Parseable is a type that can be parsed into a JWT,
 // either a string or byte slice.
 type Parseable interface {
