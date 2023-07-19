@@ -201,6 +201,12 @@ type SymmetricKey interface {
 	[]byte | string
 }
 
+// VerifyKey is a type that can be used to verify a JWT using
+// either a symmetric or asymmetric algorithm.
+type VerifyKey interface {
+	PublicKey | SymmetricKey
+}
+
 // Parseable is a type that can be parsed into a JWT,
 // either a string or byte slice.
 type Parseable interface {
