@@ -1,5 +1,8 @@
 package jwa
 
+// Algorithm represents a cryptographic algorithm used for signing or
+// encrypting a JWS or JWE object respectively.
+//
 // https://datatracker.ietf.org/doc/html/rfc7518#section-3.1
 type Algorithm = string
 
