@@ -370,7 +370,7 @@ func WithAllowedIssuers(issuers ...string) VerifyOption {
 // WithAllowedAudiences sets the allowed audiences for the JWT.
 func WithAllowedAudiences(audiences ...string) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedAudiences = append(vc.AllowedAudiences, audiences...)
+		vc.AllowedAudiences = audiences
 		return nil
 	}
 }
