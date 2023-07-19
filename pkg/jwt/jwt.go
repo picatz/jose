@@ -189,6 +189,12 @@ type PrivateKey interface {
 	*rsa.PrivateKey | *ecdsa.PrivateKey | ed25519.PrivateKey | []byte | string
 }
 
+// PublicKey is a type that can be used to verify a JWT using
+// an asymmetric algorithm, such as *rsa.PublicKey or *ecdsa.PublicKey.
+type PublicKey interface {
+	*rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
+}
+
 // Parseable is a type that can be parsed into a JWT,
 // either a string or byte slice.
 type Parseable interface {
