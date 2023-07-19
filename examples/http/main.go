@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -13,7 +12,7 @@ import (
 func main() {
 	token, err := jwt.New(
 		header.Parameters{
-			header.Type:      header.TypeJWT,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		}, jwt.ClaimsSet{
 			"sub":  "1234567890",
@@ -25,14 +24,21 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println(token)
+	fmt.Println("Use this token:", token)
+
+	// Print out the curl command to test the server
+	fmt.Printf("\ncurl http://127.0.0.1:8080 -H 'Authorization: Bearer %s' -v\n\n", token)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		bearerToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		bearerToken, err := jwt.FromHTTPAuthorizationHeader(r)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 
-		_, err := jwt.ParseAndVerify(bearerToken, jwt.SecretKey("supersecret"))
+		_, err = jwt.ParseAndVerify(bearerToken, jwt.WithKey("supersecret"))
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -41,6 +47,6 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	fmt.Println("Listening on http://0.0.0.0:8080")
+	fmt.Println("Listening on http://127.0.0.1:8080")
 	panic(http.ListenAndServe(":8080", mux))
 }

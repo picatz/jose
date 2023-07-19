@@ -12,6 +12,8 @@ import (
 // There are three classes of Header Parameter names: Registered Header
 // Parameter names, Public Header Parameter names, and Private Header
 // Parameter names.
+//
+// https://datatracker.ietf.org/doc/html/rfc7515#section-4
 type (
 	ParamaterName = string
 
@@ -20,32 +22,92 @@ type (
 	Private    = ParamaterName
 )
 
-// Registered Header Paramater Names
+// Registered header paramater names used in JWS and JWE.
+//
+// # IANA Registry
+//
+// https://www.iana.org/assignments/jose/jose.xhtml
 //
 // https://datatracker.ietf.org/doc/html/rfc7515#section-4.1
 const (
-	Type                            Registered = "typ"
-	Algorithm                       Registered = "alg"
-	JWKSetURL                       Registered = "jku"
-	JSONWebKey                      Registered = "jwk"
-	X509URL                         Registered = "x5u"
-	X509CertificateChain            Registered = "x5c"
-	X509CertificateSHA1Thumbprint   Registered = "x5t"
-	X509CertificateSHA256Thumbprint Registered = "x5tX#S256"
-	ContentType                     Registered = "cty"
-	Critical                        Registered = "crit"
+	// Algorithm "alg" is the algorithm intended for use with the JWS or JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.1
+	Algorithm Registered = "alg"
 
+	// JWKSetURL "jku" is a URL that refers to a resource for a set of JSON-encoded public keys,
+	// one of which corresponds to the key used to digitally sign the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.2
+	JWKSetURL Registered = "jku"
+
+	// JSONWebKey "jwk" is the public key that corresponds to the key used to digitally sign
+	// the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.3
+	JSONWebKey Registered = "jwk"
+
+	// KeyID "kid" is a hint indicating which key was used to secure the JWS or JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.4
+	KeyID Registered = "kid"
+
+	// X509URL "x5u" is a URL that refers to a resource for the X.509 public key certificate
+	// or certificate chain corresponding to the key used to digitally sign the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.5
+	X509URL Registered = "x5u"
+
+	// X509CertificateChain "x5c" is the X.509 public key certificate or certificate chain
+	// corresponding to the key used to digitally sign the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.6
+	X509CertificateChain Registered = "x5c"
+
+	// X509CertificateSHA1Thumbprint "x5t" is the base64url-encoded SHA-1 thumbprint (a.k.a. digest)
+	// of the DER encoding of the X.509 certificate corresponding to the key used to digitally sign the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.7
+	X509CertificateSHA1Thumbprint Registered = "x5t"
+
+	// X509CertificateSHA256Thumbprint "x5t#S256" is the base64url-encoded SHA-256 thumbprint (a.k.a. digest)
+	// of the DER encoding of the X.509 certificate corresponding to the key used to digitally sign the JWS or encrypt the JWE.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.8
+	X509CertificateSHA256Thumbprint Registered = "x5tX#S256"
+
+	// Type "typ" is the [media type] of this complete JOSE object (JWS or JWE).
+	//
+	// [media type]: https://www.iana.org/assignments/media-types/media-types.xhtml
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.9
+	Type Registered = "typ"
+
+	// ContentType "cty" is the media type of the secured content (the payload).
+	//
+	// [media type]: https://www.iana.org/assignments/media-types/media-types.xhtml
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.10
+	ContentType Registered = "cty"
+
+	// Critical "crit" is a list of header parameter names that have
+	// values that MUST be integrity protected by the JWS signer.
+	//
+	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11
+	Critical Registered = "crit"
+
+	// EncryptionAlgorithm "enc" is the encryption algorithm used to encrypt
+	// the "plaintext" to produce the "ciphertext".
+	//
 	// https://www.rfc-editor.org/rfc/rfc7516.html#section-4.1.2
 	Encryption Registered = "enc"
 
+	// Zip "zip" is the compression algorithm used to compress the "plaintext"
+	// before encryption.
+	//
 	// https://www.rfc-editor.org/rfc/rfc7516.html#section-4.1.3
 	Zip Registered = "zip"
-
-	// https://www.rfc-editor.org/rfc/rfc7516.html#section-4.1.6
-	KeyID Registered = "kid"
 )
-
-const TypeJWT = "JWT"
 
 // Parameters is a JSON object containing the parameters describing
 // the cryptographic operations and parameters employed.

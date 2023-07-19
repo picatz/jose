@@ -1,5 +1,8 @@
 package jwa
 
+// Algorithm represents a cryptographic algorithm used for signing or
+// encrypting a JWS or JWE object respectively.
+//
 // https://datatracker.ietf.org/doc/html/rfc7518#section-3.1
 type Algorithm = string
 
@@ -71,8 +74,18 @@ const (
 // https://datatracker.ietf.org/doc/html/rfc7518#section-3.6
 const None Algorithm = "none"
 
-// I have no idea where these are documented, but other libraries implement them?
-const (
-	ES256K Algorithm = "ES256K"
-	EdDSA  Algorithm = "EdDSA"
-)
+// EdDSA algorithms using Ed25519 (and Ed448, which is not implemented).
+//
+// https://datatracker.ietf.org/doc/html/rfc8037#section-3.1
+const EdDSA Algorithm = "EdDSA"
+
+//	ECDSA with secp256k1 and SHA-256 (used in Bitcoin and Ethereum).
+//
+// # Warning
+//
+// This algorithm is not implemented in this library, but is included
+// for completeness and documentation purposes.
+//
+// https://datatracker.ietf.org/doc/html/draft-jones-webauthn-secp256k1
+// https://datatracker.ietf.org/doc/html/draft-ietf-cose-webauthn-algorithms-04#section-3.2
+const ES256K Algorithm = "ES256K"

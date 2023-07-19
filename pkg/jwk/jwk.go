@@ -1,11 +1,17 @@
 package jwk
 
 import (
+	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/picatz/jose/pkg/base64"
 )
@@ -208,6 +214,27 @@ func ECDSAValues(v Value) (crv, x, y string, err error) {
 	return
 }
 
+// Ed25519Values returns the values for the Ed25519 key type.
+func Ed25519Values(v Value) (x string, err error) {
+	if v[KeyType] != "OKP" {
+		err = fmt.Errorf("JWK value is not OKP")
+		return
+	}
+
+	if v[Curve] != "Ed25519" {
+		err = fmt.Errorf("JWK value is not Ed25519")
+		return
+	}
+
+	x = fmt.Sprintf("%v", v[X])
+	if x == "" {
+		err = fmt.Errorf("no %q set", X)
+		return
+	}
+
+	return
+}
+
 // SymmetricKey returns the symmetric key.
 func SymmetricKey(v Value) (k string, err error) {
 	k = fmt.Sprintf("%v", v[K])
@@ -332,6 +359,78 @@ func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err e
 	return
 }
 
+// Ed25519PublicKey returns the Ed25519 public key, or an error if the
+// key is not an Ed25519 public key.
+func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
+	x, err := Ed25519Values(v)
+	if err != nil {
+		err = fmt.Errorf("failed to get Ed25519 values for public key: %w", err)
+		return
+	}
+
+	xBytes, err := base64.Decode(x)
+	if err != nil {
+		err = fmt.Errorf("failed to decode Ed25519 public key X: %w", err)
+		return
+	}
+
+	// check the length of the key to make sure it is 32 bytes
+	if len(xBytes) != ed25519.PublicKeySize {
+		err = fmt.Errorf("invalid Ed25519 public key X length: %d", len(xBytes))
+		return
+	}
+
+	pkey = xBytes
+
+	return
+}
+
+// ValueFromPublicKey returns a JWK value from the given public key.
+func ValueFromPublicKey(pubKey any) (Value, error) {
+	switch pubKey := pubKey.(type) {
+	case *rsa.PublicKey:
+		value := Value{
+			KeyType:      "RSA",
+			PublicKeyUse: "sig",
+			N:            base64.Encode(pubKey.N.Bytes()),
+			E:            base64.Encode(big.NewInt(int64(pubKey.E)).Bytes()),
+		}
+
+		return value, nil
+	case *ecdsa.PublicKey:
+		var crv string
+		switch pubKey.Curve {
+		case elliptic.P224():
+			crv = "P-224"
+		case elliptic.P256():
+			crv = "P-256"
+		case elliptic.P384():
+			crv = "P-384"
+		case elliptic.P521():
+			crv = "P-521"
+		default:
+			return nil, fmt.Errorf("invalid curve %q used for JWK value", pubKey.Curve)
+		}
+
+		return Value{
+			KeyType:      "EC",
+			PublicKeyUse: "sig",
+			Curve:        crv,
+			X:            base64.Encode(pubKey.X.Bytes()),
+			Y:            base64.Encode(pubKey.Y.Bytes()),
+		}, nil
+	case ed25519.PublicKey:
+		return Value{
+			KeyType:      "OKP",
+			PublicKeyUse: "sig",
+			Curve:        "Ed25519",
+			X:            base64.Encode(pubKey),
+		}, nil
+	default:
+		return nil, fmt.Errorf("invalid type %T used for JWK value", pubKey)
+	}
+}
+
 // Set is a JWK set as defined in RFC 7517.
 //
 // https://datatracker.ietf.org/doc/html/rfc7517#section-5
@@ -357,4 +456,203 @@ func (s *Set) Validate() error {
 	}
 
 	return nil
+}
+
+// Get returns the key that matches the given key id.
+func (s *Set) Get(keyID string) (Value, error) {
+	for _, key := range s.Keys {
+		if key[KeyID] == keyID {
+			return key, nil
+		}
+	}
+
+	return nil, fmt.Errorf("key %q found in set", keyID)
+}
+
+// FetchSet fetches a JWK set from the given URL and HTTP client.
+func FetchSet(ctx context.Context, url string, client *http.Client) (*Set, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWK set request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWK set: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch JWK set: %s", resp.Status)
+	}
+
+	var set Set
+	err = json.NewDecoder(resp.Body).Decode(&set)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JWK set: %w", err)
+	}
+
+	err = set.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to validate JWK set: %w", err)
+	}
+
+	return &set, nil
+}
+
+// URLSetCache is a cache of JWK sets keyed by URL that can be easily used to verify
+// JWTs from multiple issuers. It handles refreshing the JWK sets when they expire,
+// retrying failed fetches, and caching the JWK sets for a configurable amount of time.
+type URLSetCache struct {
+	mutex sync.RWMutex
+
+	// sets is a map of JWK sets keyed by URL.
+	sets map[string]*Set
+
+	// cacheTimes is a map of JWK set cache times keyed by URL.
+	cacheTimes map[string]time.Time
+
+	// client is the HTTP client used to fetch JWK sets.
+	client *http.Client
+
+	// refreshInterval is the amount of time between refreshing JWK sets.
+	refreshInterval time.Duration
+
+	// cacheDuration is the amount of time to cache JWK sets.
+	cacheDuration time.Duration
+}
+
+// NewURLSetCache returns a new JWK set cache.
+func NewURLSetCache(client *http.Client, refreshInterval, cacheDuration time.Duration) *URLSetCache {
+	return &URLSetCache{
+		mutex:           sync.RWMutex{},
+		sets:            make(map[string]*Set),
+		client:          client,
+		refreshInterval: refreshInterval,
+		cacheDuration:   cacheDuration,
+	}
+}
+
+// Get returns the JWK set for the given URL, fetching it if it is not already cached.
+func (c *URLSetCache) Get(ctx context.Context, url string) (*Set, error) {
+	c.mutex.RLock()
+	set, ok := c.sets[url]
+	urlCacheTime := c.cacheTimes[url]
+	c.mutex.RUnlock()
+
+	if !ok {
+		return c.Fetch(ctx, url)
+	}
+
+	if time.Now().After(urlCacheTime) {
+		return c.Refresh(ctx, url)
+	}
+
+	return set, nil
+}
+
+// Get returns the first key from the JWK set for the given URL that matches the given key id,
+// fetching the JWK set if it is not already cached.
+func (c *URLSetCache) GetKey(ctx context.Context, url string, keyID string) (Value, error) {
+	c.mutex.RLock()
+	set, ok := c.sets[url]
+	urlCacheTime := c.cacheTimes[url]
+	c.mutex.RUnlock()
+
+	if !ok {
+		var err error
+		set, err = c.Fetch(ctx, url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch JWK set: %w", err)
+		}
+	}
+
+	if time.Now().After(urlCacheTime) {
+		var err error
+		set, err = c.Refresh(ctx, url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to refresh JWK set: %w", err)
+		}
+	}
+
+	key, err := set.Get(keyID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get key %q from JWK set: %w", keyID, err)
+	}
+
+	return key, nil
+}
+
+// Range iterates over the JWK sets in the cache, calling the given function for each
+// URL and key. If the function returns false, the iteration will stop.
+func (c *URLSetCache) Range(fn func(url string, key Value) bool) {
+	if fn == nil || c == nil {
+		return
+	}
+
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
+	for url, set := range c.sets {
+		for _, key := range set.Keys {
+			if !fn(url, key) {
+				return
+			}
+		}
+	}
+}
+
+// Fetch fetches the JWK set for the given URL.
+func (c *URLSetCache) Fetch(ctx context.Context, url string) (*Set, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	set, err := FetchSet(ctx, url, c.client)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch JWK set: %w", err)
+	}
+
+	c.sets[url] = set
+
+	return set, nil
+}
+
+// Refresh refreshes the JWK set for the given URL.
+func (c *URLSetCache) Refresh(ctx context.Context, url string) (*Set, error) {
+	return c.Fetch(ctx, url)
+}
+
+// RefreshAll refreshes all JWK sets in the cache.
+func (c *URLSetCache) RefreshAll(ctx context.Context) error {
+	for url := range c.sets {
+		set, err := FetchSet(ctx, url, c.client)
+		if err != nil {
+			return fmt.Errorf("failed to refresh JWK set for %q: %w", url, err)
+		}
+
+		c.sets[url] = set
+	}
+	return nil
+}
+
+// Start starts the JWK set cache, refreshing the JWK sets at the given interval.
+// It will block until the context is canceled, and will only return an error if
+// the refresh fails, possibly due to a network error.
+//
+// Most callers will want to call this in a goroutine after creating the cache.
+func (c *URLSetCache) Start(ctx context.Context) error {
+	ticker := time.NewTicker(c.refreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			err := c.RefreshAll(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to refresh JWK sets: %w", err)
+			}
+		}
+	}
 }

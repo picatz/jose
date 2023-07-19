@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net/http"
 	"strings"
 	"time"
 
@@ -21,10 +23,17 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// HeaderType "JWT" is used as the "typ" for all JSON Web Tokens.
+// Type "JWT" is the media type used by JSON Web Token (JWT).
 //
-// https://datatracker.ietf.org/doc/html/rfc7519#section-5.1
-const HeaderType header.ParamaterName = "JWT"
+// # Example
+//
+//	header := header.Parameters{
+//		header.Type:      jwt.Type,
+//		header.Algorithm: jwa.HS256,
+//	}
+//
+// https://www.rfc-editor.org/rfc/rfc7515.html#section-3.3
+const Type header.ParamaterName = "JWT"
 
 // Token is a decoded JSON Web Token, a string representing a
 // set of claims as a JSON object that is encoded in a JWS or
@@ -114,8 +123,12 @@ func New(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
 		}
 	}
 
-	// Header type parameter "typ" is always "JWT".
-	params[header.Type] = header.TypeJWT
+	// Ensure the "typ" header parameter is set to "JWT", as it is required.
+	if _, ok := params[header.Type]; !ok {
+		params[header.Type] = Type
+	} else if params[header.Type] != Type {
+		return nil, fmt.Errorf("header type %q is not supported", params[header.Type])
+	}
 
 	// Create a token, in preparation to sign it.
 	token := &Token{
@@ -124,7 +137,7 @@ func New(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
 	}
 
 	// Sign it.
-	_, err := token.Sign(SecretKey(key))
+	_, err := token.Sign(key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign token: %w", err)
 	}
@@ -173,28 +186,68 @@ func (t *Token) String() string {
 	return t.computeString()
 }
 
+// PrivateKey is a type that can be used to sign a JWT,
+// such as a *rsa.PrivateKey or *ecdsa.PrivateKey.
+//
+// This may be a shared secret key, such as a []byte or string, but
+// this is not recommended.
+type PrivateKey interface {
+	*rsa.PrivateKey | *ecdsa.PrivateKey | ed25519.PrivateKey | []byte | string
+}
+
+// PublicKey is a type that can be used to verify a JWT using
+// an asymmetric algorithm, such as *rsa.PublicKey or *ecdsa.PublicKey.
+type PublicKey interface {
+	*rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
+}
+
+// SymmetricKey is a type that can be used to sign or verify a JWT using
+// a symmetric algorithm, such as HMAC.
+type SymmetricKey interface {
+	[]byte | string
+}
+
+// VerifyKey is a type that can be used to verify a JWT using
+// either a symmetric or asymmetric algorithm.
+type VerifyKey interface {
+	PublicKey | SymmetricKey
+}
+
+// SigningKey is a type that can be used to sign a JWT using
+// either a symmetric or asymmetric algorithm.
+type SigningKey interface {
+	PrivateKey | SymmetricKey
+}
+
+// Parseable is a type that can be parsed into a JWT,
+// either a string or byte slice.
+type Parseable interface {
+	~string | ~[]byte
+}
+
 // Parse parses a given JWT, and returns a Token or an error
 // if the JWT fails to parse.
-func Parse(input any) (*Token, error) {
-	switch input := input.(type) {
-	case string:
-		return ParseString(input)
-	case []byte:
-		return ParseString(string(input))
-	default:
-		return nil, fmt.Errorf("invalid type %T used for JWT parsing", input)
-	}
+//
+// # Warning
+//
+// This is a low-level function that does not verify the
+// signature of the token. Use ParseAndVerify to parse
+// and verify the signature of a token in one step.
+// Otherwise, use Parse to parse a token, and then
+// use the VerifySignature method to verify the signature.
+func Parse[T Parseable](input T) (*Token, error) {
+	return ParseString(string(input))
 }
 
 // ParseAndVerify parses a given JWT, and verifies the signature
 // using the given verification configuration options.
-func ParseAndVerify(input any, veryifyOptions ...ConfigOption) (*Token, error) {
+func ParseAndVerify[T Parseable](input T, veryifyOptions ...VerifyOption) (*Token, error) {
 	token, err := Parse(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse JWT: %w", err)
 	}
 
-	err = token.VerifySignature(veryifyOptions...)
+	err = token.Verify(veryifyOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify JWT signature: %w", err)
 	}
@@ -204,65 +257,70 @@ func ParseAndVerify(input any, veryifyOptions ...ConfigOption) (*Token, error) {
 
 // ParseString parses a given JWT string, and returns a Token
 // or an error if the JWT fails to parse.
+//
+// # Warning
+//
+// This is a low-level function that does not verify the
+// signature of the token. Use ParseAndVerify to parse
+// and verify the signature of a token in one step.
+// Otherwise, use Parse to parse a token, and then
+// use the VerifySignature method to verify the signature.
 func ParseString(input string) (*Token, error) {
 	token := &Token{}
 
 	token.raw = input
 
-	fields := strings.Split(input, ".")
-
-	if len(fields) >= 1 {
-		b, err := base64.Decode(fields[0])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
-		}
-		h := jws.Header{}
-		err = json.NewDecoder(bytes.NewReader(b)).Decode(&h)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
-		}
-		token.Header = h
-
-		// ensure using JWA types instead of raw string
-		if _, ok := token.Header[header.Algorithm]; ok {
-			token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
-		}
+	parts, err := splitToken(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split token: %w", err)
 	}
 
-	if len(fields) >= 2 {
-		b, err := base64.Decode(fields[1])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode claims base64: %w", err)
-		}
-		claims := ClaimsSet{}
-		err = json.NewDecoder(bytes.NewReader(b)).Decode(&claims)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
-		}
-		token.Claims = claims
+	b, err := base64.Decode(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
+	}
+	h := jws.Header{}
+	err = json.NewDecoder(bytes.NewReader(b)).Decode(&h)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
+	}
+	token.Header = h
 
-		for claimName, claimValue := range token.Claims {
-			// parsing JSON values into an interface can be tricky
-			switch claimName {
-			case IssuedAt, ExpirationTime, NotBefore:
-				switch v := claimValue.(type) {
-				case int64: // good
-				case float64: // ok
-					token.Claims[claimName] = int64(v)
-				default: // bad
-					return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
-				}
+	// ensure using JWA types instead of raw string
+	if _, ok := token.Header[header.Algorithm]; ok {
+		token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
+	}
+
+	b, err = base64.Decode(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
+	}
+	claims := ClaimsSet{}
+	err = json.NewDecoder(bytes.NewReader(b)).Decode(&claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
+	}
+	token.Claims = claims
+
+	for claimName, claimValue := range token.Claims {
+		// parsing JSON values into an interface can be tricky
+		switch claimName {
+		case IssuedAt, ExpirationTime, NotBefore:
+			switch v := claimValue.(type) {
+			case int64: // good
+			case float64: // ok
+				token.Claims[claimName] = int64(v)
+			default: // bad
+				return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
 			}
 		}
 	}
 
-	if len(fields) == 3 {
-		b, err := base64.Decode(fields[2])
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode signature base64: %w", err)
-		}
-		token.Signature = b
+	b, err = base64.Decode(parts[2])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
 	}
+	token.Signature = b
 
 	return token, nil
 }
@@ -282,23 +340,49 @@ func NewSet(strings ...string) Set[string] {
 // Issuers is a set of issuers.
 type Issuers = []string
 
-// Config is a configuration type for verifying JWTs.
-type Config struct {
+// VerifyConfig is a configuration type for verifying JWTs.
+type VerifyConfig struct {
+	// InsecureAllowNone allows the "none" algorithm to be used, which
+	// is considered insecure, dangerous, and disabled by default. It must be
+	// set in addition to being enabled in the allowed algorithms.
 	InsecureAllowNone bool
+
+	// AllowedAlgorithms is a set of allowed algorithms for the JWT.
+	//
+	// If not set, then jwt.DefaultAllowedAlgorithms will be used.
 	AllowedAlgorithms []jwa.Algorithm
-	AllowedIssuers    []string
-	AllowedAudiences  []string
-	SecretKey         any // []byte or string
-	PublicKey         any // *rsa.PublicKey or *ecdsa.PublicKey or ed25519.PublicKey
+
+	// AllowedIssuers is a set of allowed issuers for the JWT.
+	//
+	// If not set, then any issuers are allowed.
+	AllowedIssuers []string
+
+	// AllowedAudiences is a set of allowed audiences for the JWT.
+	//
+	// If not set, then any audiences are allowed.
+	AllowedAudiences []string
+
+	// AllowedKeys is a set of allowed keys for the JWT.
+	//
+	// If not set, then verification will fail if the algorithm
+	// is not "none".
+	AllowedKeys []any
+
+	// Clock is a function that returns the current time.
+	//
+	// This is used to verify the "exp", "nbf", and "iat" claims.
+	//
+	// If not set, then time.Now will be used.
+	Clock func() time.Time
 
 	// TODO(kent): add more verify options
 }
 
-// ConfigOption is a functional option type for
-// constructing a new Config.
-type ConfigOption = func(*Config) error
+// VerifyOption is a functional option type used to configure
+// the verification requirements for JWTs.
+type VerifyOption func(*VerifyConfig) error
 
-// AllowInsecureNoneAlgorithm allows the "none" algorithm to be used.
+// WithAllowInsecureNoneAlgorithm allows the "none" algorithm to be used.
 // Users must explicitly enable this option, as it is
 // considered insecure, dangerous, and disabled by default.
 //
@@ -306,125 +390,82 @@ type ConfigOption = func(*Config) error
 //
 // This is not recommended, and should only be used
 // for testing purposes.
-func AllowInsecureNoneAlgorithm(value bool) ConfigOption {
-	return func(vc *Config) error {
+func WithAllowInsecureNoneAlgorithm(value bool) VerifyOption {
+	return func(vc *VerifyConfig) error {
 		vc.InsecureAllowNone = value
 		return nil
 	}
 }
 
-// AllowedIssuers sets the allowed issuers for the JWT.
-func AllowedIssuers(issuers ...string) ConfigOption {
-	return func(vc *Config) error {
-		vc.AllowedIssuers = append(vc.AllowedIssuers, issuers...)
+// WithAllowedIssuers sets the allowed issuers for the JWT.
+func WithAllowedIssuers(issuers ...string) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedIssuers = issuers
 		return nil
 	}
 }
 
-// AllowedAudiences sets the allowed audiences for the JWT.
-func AllowedAudiences(audiences ...string) ConfigOption {
-	return func(vc *Config) error {
-		vc.AllowedAudiences = append(vc.AllowedAudiences, audiences...)
+// WithAllowedAudiences sets the allowed audiences for the JWT.
+func WithAllowedAudiences(audiences ...string) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedAudiences = audiences
 		return nil
 	}
 }
 
-// AllowedAlgorithms sets the allowed algorithms for the JWT.
-func AllowedAlgorithms(algs ...jwa.Algorithm) ConfigOption {
-	return func(vc *Config) error {
-		vc.AllowedAlgorithms = append(vc.AllowedAlgorithms, algs...)
+// WithAllowedAlgorithms sets the allowed algorithms for the JWT.
+func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedAlgorithms = algs
 		return nil
 	}
 }
 
-// SecretKey sets the secret key value for HMAC signing.
-func SecretKey(value any) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = value
-		return nil
-	}
-}
-
-// PublicKey sets the public key value for RSA, ECDSA, or EdDSA signing.
+// WithKey appends a key to the set of allowed keys for the JWT.
 //
-// It is the generic version of RSAPublicKey, ECDSAPublicKey, and EdDSAPublicKey.
-func PublicKey(pubKey any) ConfigOption {
-	return func(c *Config) error {
-		switch pubKey := pubKey.(type) {
-		case *rsa.PublicKey:
-			c.PublicKey = pubKey
-		case *ecdsa.PublicKey:
-			c.PublicKey = pubKey
-		case ed25519.PublicKey:
-			c.PublicKey = pubKey
-		default:
-			return fmt.Errorf("invalid type %T used for public key", pubKey)
-		}
+// This is the preferred way to add a key to the set of allowed keys,
+// because it will ensure that the givne key is of the correct type
+// at compile time.
+func WithKey[T VerifyKey](key T) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedKeys = append(vc.AllowedKeys, key)
 		return nil
 	}
 }
 
-// RSAPublicKey sets the public key value for RSA verification.
-func RSAPublicKey(pubKey *rsa.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
+// WithKeys sets the allowed keys for the JWT.
+func WithKeys(values ...any) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.AllowedKeys = values
 		return nil
 	}
 }
 
-// ECDSAPublicKey sets the public key value for ECDSA verification.
-func ECDSAPublicKey(pubKey *ecdsa.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
+// WithClock sets the clock function for verifying the JWT.
+func WithClock(clock Clock) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.Clock = clock
 		return nil
 	}
 }
 
-// EdDSAPublicKey sets the public key value for EdDSA verification.
-func EdDSAPublicKey(pubKey ed25519.PublicKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.PublicKey = pubKey
+// WithDefaultClock sets the clock function for verifying the JWT
+// to time.Now.
+func WithDefaultClock() VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.Clock = time.Now
 		return nil
 	}
 }
 
-// PrivateKey sets the private key value for RSA, ECDSA, or EdDSA signing.
-func PrivateKey(privKey any) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// RSAPrivateKey sets the private key value for RSA signing.
-func RSAPrivateKey(privKey *rsa.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// ECDSAPrivateKey sets the private key value for ECDSA signing.
-func ECDSAPrivateKey(privKey *ecdsa.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
-
-// EdDSAPrivateKey sets the private key value for EdDSA signing.
-func EdDSAPrivateKey(privKey ed25519.PrivateKey) ConfigOption {
-	return func(vc *Config) error {
-		vc.SecretKey = privKey
-		return nil
-	}
-}
+// Clock is type used to represent a function that returns the current time.
+type Clock func() time.Time
 
 // Expired returns true if the token is expired, false otherwise.
 // If an error occurs while checking expiration, it is returned.
 //
 // Only use the boolean value if error is nil.
-func (t *Token) Expired() (bool, error) {
+func (t *Token) Expired(clock Clock) (bool, error) {
 	expValue, ok := t.Claims[ExpirationTime]
 	if !ok {
 		return false, nil
@@ -435,7 +476,7 @@ func (t *Token) Expired() (bool, error) {
 	}
 	exp := time.Unix(expInt, 0)
 
-	return exp.Before(time.Now()), nil
+	return exp.Before(clock()), nil
 }
 
 // Expires returns true if the token has an expiration time claim,
@@ -474,82 +515,72 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 
 // VerifySignature verifies the signature of the token using the
 // given verification configuration options.
-func (t *Token) VerifySignature(veryifyOptions ...ConfigOption) error {
-	// Set default config values that can be overridden by options.
-	config := &Config{}
-
-	// Apply options.
-	for _, opt := range veryifyOptions {
-		err := opt(config)
-		if err != nil {
-			return fmt.Errorf("verify signature option error: %w", err)
-		}
-	}
-
-	// If the allowed issuers is empty, then any issuer is allowed.
-	//
-	// Otherwise, the issuer must be in the allowed issuers map.
-	if config.AllowedIssuers != nil {
-		issuer := fmt.Sprintf("%s", t.Claims[Issuer])
-
-		if !slices.Contains(config.AllowedIssuers, issuer) {
-			return fmt.Errorf("requested issuer %q is not allowed", issuer)
-		}
-	}
-
-	// If the allowed audiences is empty, then any audience is allowed.
-	//
-	// Otherwise, the audience must be in the allowed audiences map.
-	if config.AllowedAudiences != nil {
-		audience := fmt.Sprintf("%s", t.Claims[Audience])
-
-		if !slices.Contains(config.AllowedAudiences, audience) {
-			return fmt.Errorf("requested audience %q is not allowed", audience)
-		}
-	}
-
+//
+// # Warning
+//
+// This only verifies the signature, and does not verify any
+// other claims, such as expiration time, issuer, audience, etc.
+func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys ...any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
 		return fmt.Errorf("failed to verify alg: %w", err)
 	}
 
-	if len(config.AllowedAlgorithms) > 0 {
-		if !slices.Contains(config.AllowedAlgorithms, alg) {
-			return fmt.Errorf("requested algorithm %q is not allowed", alg)
-		}
-	}
-
-	if alg == jwa.None && !config.InsecureAllowNone {
-		return fmt.Errorf("requested dangerous algorithm %q is not allowed", alg)
+	if !slices.Contains(allowedAlgs, alg) {
+		return fmt.Errorf("requested algorithm %q is not allowed", alg)
 	}
 
 	// Require a key (symmetric or asymmetric) for all algorithms except "none".
-	if config.SecretKey == nil && config.PublicKey == nil {
+	if len(allowedKeys) == 0 && !slices.Contains(allowedAlgs, jwa.None) {
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
 	// Verify the signature based on the algorithm.
 	switch alg {
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return t.VerifyHMACSignature(algHash[alg], config.SecretKey)
+		for _, key := range allowedKeys {
+			err := t.VerifyHMACSignature(algHash[alg], key)
+			if err == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
 	case jwa.RS256, jwa.RS384, jwa.RS512:
-		publicKey, ok := config.PublicKey.(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify RSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range allowedKeys {
+			publicKey, ok := key.(*rsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyRSASignature(algHash[alg], publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyRSASignature(algHash[alg], publicKey)
+		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		publicKey, ok := config.PublicKey.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify ECDSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range allowedKeys {
+			publicKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyECDSASignature(algHash[alg], publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyECDSASignature(algHash[alg], publicKey)
+		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
 	case jwa.EdDSA:
-		publicKey, ok := config.PublicKey.(ed25519.PublicKey)
-		if !ok {
-			return fmt.Errorf("failed to verify EdDSA signature: public key option %T is invalid", config.PublicKey)
+		for _, key := range allowedKeys {
+			publicKey, ok := key.(ed25519.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
+			}
+			err := t.VerifyEdDSASignature(publicKey)
+			if err == nil {
+				return nil
+			}
 		}
-		return t.VerifyEdDSASignature(publicKey)
+		return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
 	default:
 		return fmt.Errorf("algorithm %q not implemented or allowed", alg)
 	}
@@ -850,73 +881,44 @@ func (t *Token) EdDSASignature(privateKey ed25519.PrivateKey) ([]byte, error) {
 }
 
 // Sign returns the signature of the token using the given options.
-func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
-	config := &Config{}
-
-	for _, opt := range options {
-		err := opt(config)
-		if err != nil {
-			return nil, fmt.Errorf("sign config option error: %w", err)
-		}
-	}
-
-	if len(config.AllowedIssuers) > 0 {
-		issuer := fmt.Sprintf("%v", t.Claims[Issuer])
-
-		if slices.Contains(config.AllowedIssuers, issuer) {
-			return nil, fmt.Errorf("requested issuer %q is not allowed", issuer)
-		}
-	}
-
-	alg, err := t.Header.Algorithm()
-	if err != nil {
-		return nil, fmt.Errorf("failed to verify alg: %w", err)
-	}
-
-	if len(config.AllowedAlgorithms) > 0 {
-		if !slices.Contains(config.AllowedAlgorithms, alg) {
-			return nil, fmt.Errorf("requested algorithm %q is not allowed", alg)
-		}
-	}
-
-	if alg == jwa.None && !config.InsecureAllowNone {
-		return nil, fmt.Errorf("requested dangerous algorithm %q is not allowed", alg)
-	}
-
+func (t *Token) Sign(key any) ([]byte, error) {
 	typ, err := t.Header.Type()
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT header type: %w", err)
 	}
 
-	switch typ {
-	case header.TypeJWT:
-	default:
-		return nil, fmt.Errorf("type %q not implemented", typ)
+	if typ != Type {
+		return nil, fmt.Errorf("invalid JWT header type: %q", typ)
+	}
+
+	alg, err := t.Header.Algorithm()
+	if err != nil {
+		return nil, fmt.Errorf("missing JWT header algorithm: %w", err)
 	}
 
 	switch alg {
 	case jwa.HS256:
-		sig, err := t.HMACSignature(crypto.SHA256, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA256, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.HS384:
-		sig, err := t.HMACSignature(crypto.SHA384, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA384, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.HS512:
-		sig, err := t.HMACSignature(crypto.SHA512, config.SecretKey)
+		sig, err := t.HMACSignature(crypto.SHA512, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.ES256:
-		privateKey, ok := config.SecretKey.(*ecdsa.PrivateKey)
+		privateKey, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA256", config.SecretKey)
+			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA256", key)
 		}
 		sig, err := t.ECDSASignature(crypto.SHA256, privateKey)
 		if err != nil {
@@ -924,15 +926,27 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 		}
 		t.Signature = sig
 	case jwa.RS256:
-		privateKey, ok := config.SecretKey.(*rsa.PrivateKey)
+		privateKey, ok := key.(*rsa.PrivateKey)
 		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", config.SecretKey)
+			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
 		}
 		sig, err := t.RSASignature(crypto.SHA256, privateKey)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
+	case jwa.EdDSA:
+		privateKey, ok := key.(ed25519.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("invalid secret key type %T for EdDSA", key)
+		}
+		sig, err := t.EdDSASignature(privateKey)
+		if err != nil {
+			return nil, err
+		}
+		t.Signature = sig
+	case jwa.None:
+		// no signature
 	default:
 		return nil, fmt.Errorf("algorithm %q not implemented", alg)
 	}
@@ -942,15 +956,72 @@ func (t *Token) Sign(options ...ConfigOption) ([]byte, error) {
 	return t.Signature, nil
 }
 
+var defaultAllowedAlogrithms = []jwa.Algorithm{
+	jwa.RS256, jwa.RS384, jwa.RS512,
+	jwa.ES256, jwa.ES384, jwa.ES512,
+	jwa.HS256, jwa.HS384, jwa.HS512,
+	jwa.PS256, jwa.PS384, jwa.PS512,
+	jwa.EdDSA,
+}
+
+func DefaultAllowedAlogrithms() []jwa.Algorithm {
+	return defaultAllowedAlogrithms
+}
+
 // Verify is used to verify a signed Token object with the given config options.
 // If this fails for any reason, an error is returned.
-func (t *Token) Verify(opts ...ConfigOption) error {
-	err := t.VerifySignature(opts...)
+func (t *Token) Verify(opts ...VerifyOption) error {
+	// Set default config values that can be overridden by options.
+	config := &VerifyConfig{
+		InsecureAllowNone: false,
+		AllowedAlgorithms: []jwa.Algorithm{
+			jwa.RS256, jwa.RS384, jwa.RS512,
+			jwa.ES256, jwa.ES384, jwa.ES512,
+			jwa.HS256, jwa.HS384, jwa.HS512,
+			jwa.PS256, jwa.PS384, jwa.PS512,
+			jwa.EdDSA,
+		},
+		Clock: time.Now,
+	}
+
+	// Apply options.
+	for _, opt := range opts {
+		err := opt(config)
+		if err != nil {
+			return fmt.Errorf("verify option error: %w", err)
+		}
+	}
+
+	// Verify the signature of the token, which may be "none" if the
+	// explictly allowed "none" algorithm is set in the config.
+	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys...)
 	if err != nil {
 		return fmt.Errorf("failed to validate token signature: %w", err)
 	}
 
-	expired, err := t.Expired()
+	// If the allowed issuers is empty, then any issuer is allowed.
+	//
+	// Otherwise, the issuer must be in the allowed issuers map.
+	if config.AllowedIssuers != nil {
+		issuer := fmt.Sprintf("%s", t.Claims[Issuer])
+
+		if !slices.Contains(config.AllowedIssuers, issuer) {
+			return fmt.Errorf("requested issuer %q is not allowed", issuer)
+		}
+	}
+
+	// If the allowed audiences is empty, then any audience is allowed.
+	//
+	// Otherwise, the audience must be in the allowed audiences map.
+	if config.AllowedAudiences != nil {
+		audience := fmt.Sprintf("%s", t.Claims[Audience])
+
+		if !slices.Contains(config.AllowedAudiences, audience) {
+			return fmt.Errorf("requested audience %q is not allowed", audience)
+		}
+	}
+
+	expired, err := t.Expired(time.Now)
 	if err != nil {
 		return fmt.Errorf("failed to validate token expiration: %w", err)
 	}
@@ -982,4 +1053,69 @@ func splitToken(token string) ([3]string, error) {
 	}
 
 	return [3]string{parts[0], parts[1], parts[2]}, nil
+}
+
+// FromHTTPAuthorizationHeader extracts a JWT string from the Authorization header of an HTTP request.
+// If the Authorization header is not set, then an error is returned.
+//
+// # Warning
+//
+// This value needs to be parsed and verified before it can be used safely.
+func FromHTTPAuthorizationHeader(r *http.Request) (string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("missing authorization header")
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid authorization header format")
+	}
+
+	if strings.ToLower(parts[0]) != "bearer" {
+		return "", fmt.Errorf("invalid authorization header format")
+	}
+
+	return parts[1], nil
+}
+
+// HTTPHeaderValue is a type that can be used as a value when setting
+// an HTTP request header.
+type HTTPHeaderValue interface {
+	string | *Token
+}
+
+// SetHTTPAuthorizationHeader sets the Authorization header of an HTTP request
+// to the given JWT. The JWT is prefixed with "Bearer ", as required by the
+// HTTP Authorization header specification.
+//
+// https://tools.ietf.org/html/rfc6750#section-2.1
+func SetHTTPAuthorizationHeader[T HTTPHeaderValue](r *http.Request, jwt T) {
+	r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
+}
+
+// contextKey is a type used to store values in a context object.
+//
+// We use this type to avoid collisions with other packages that
+// may also use context values in the same context.
+type contextKey string
+
+const (
+	// ContextKey is the key used to store the JWT in the context.
+	ContextKey contextKey = "jwt"
+)
+
+// FromContext extracts a JWT from the given context. If the JWT is not
+// in the context, then nil is returned.
+func FromContext(ctx context.Context) *Token {
+	token, ok := ctx.Value(ContextKey).(*Token)
+	if !ok {
+		return nil
+	}
+	return token
+}
+
+// WithContext sets the JWT in the given context.
+func WithContext(ctx context.Context, token *Token) context.Context {
+	return context.WithValue(ctx, ContextKey, token)
 }

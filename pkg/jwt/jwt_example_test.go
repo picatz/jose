@@ -24,7 +24,7 @@ var secretKeyBytes = []byte{
 func ExampleNew_symmetric() {
 	token, _ := jwt.New(
 		header.Parameters{
-			header.Type:      jwt.HeaderType,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		},
 		jwt.ClaimsSet{
@@ -36,7 +36,7 @@ func ExampleNew_symmetric() {
 		secretKeyBytes,
 	)
 
-	_ = token.Verify(jwt.AllowedAlgorithms(jwa.HS256), jwt.SecretKey(secretKeyBytes))
+	_ = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey(secretKeyBytes))
 
 	fmt.Println(token)
 	// Output: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9Cg.eyJleHAiOi02MjEzNTUxMDQwMCwiaWF0IjotNjIxMzU1OTY4MDAsIm5iZiI6LTYyMTM1NTg5NjAwLCJzdWIiOiJleGFtcGxlIn0K.ha_kAIOiX9BQegjRlPSBMuAcEo8slvXGmJPq8HaTNlU
@@ -47,7 +47,7 @@ func ExampleNew_asymmetric() {
 
 	token, _ := jwt.New(
 		header.Parameters{
-			header.Type:      jwt.HeaderType,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.RS256,
 		},
 		jwt.ClaimsSet{
@@ -59,7 +59,7 @@ func ExampleNew_asymmetric() {
 		privateKey,
 	)
 
-	_ = token.Verify(jwt.AllowedAlgorithms(jwa.RS256), jwt.PublicKey(publicKey))
+	_ = token.Verify(jwt.WithAllowedAlgorithms(jwa.RS256), jwt.WithKey(publicKey))
 
 	fmt.Println(token.Claims[jwt.Subject])
 	// Output: example

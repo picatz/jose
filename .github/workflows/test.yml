@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  push:
+    branches:
+    - main 
+  pull_request:
+    branches:
+    - main
+  schedule:
+  - cron: "0 9 * * *"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: 1.20.x
+      - run: go test ./...
+  fuzz:
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.changed_files, 'jwt/'))
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: 1.20.x
+      - name: Test
+        run: go test ./pkg/jwt -fuzztime=4m30s -fuzz .
+      - name: Report
+        if: failure() && github.event_name == 'schedule'
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # dump crashing output for debugging
+          find pkg/jwt/testdata/fuzz ! -type d -print -exec cat {} \;
+
+          # collect crashers for issue comment
+          CRASHERS=$(find pkg/jwt/testdata/fuzz ! -type d -exec cat {} \;)
+
+          # wrap in markdown code block
+          CRASHERS="\`\`\`\n$CRASHERS\n\`\`\`"
+          
+          # check if an issue already exists, add comment if it does
+          gh issue list --state open | grep -q "Fuzzing Failure $GITHUB_REF"
+          if [ $? -eq 0 ]; then
+            # get the issue number
+            ISSUE_NUMBER=$(gh issue list --state open | grep "Fuzzing Failure $GITHUB_REF" | awk '{print $1}')
+            # add a comment
+            gh issue comment $ISSUE_NUMBER --body "Fuzzing failed on $GITHUB_REF, see $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID for details.\n$CRASHERS"
+            exit 0
+          fi
+
+          # create an issue
+          gh issue create --title "Fuzzing Failure $GITHUB_REF" --body "Fuzzing failed on $GITHUB_REF, see $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID for details.\n$CRASHERS"
