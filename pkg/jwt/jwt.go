@@ -270,13 +270,12 @@ func ParseString(input string) (*Token, error) {
 
 	token.raw = input
 
-	fields := strings.Split(input, ".")
-
-	if len(fields) != 3 {
-		return nil, fmt.Errorf("invalid number of fields in JWT: %d", len(fields))
+	parts, err := splitToken(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to split token: %w", err)
 	}
 
-	b, err := base64.Decode(fields[0])
+	b, err := base64.Decode(parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
 	}
@@ -292,7 +291,7 @@ func ParseString(input string) (*Token, error) {
 		token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
 	}
 
-	b, err = base64.Decode(fields[1])
+	b, err = base64.Decode(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
 	}
@@ -317,7 +316,7 @@ func ParseString(input string) (*Token, error) {
 		}
 	}
 
-	b, err = base64.Decode(fields[2])
+	b, err = base64.Decode(parts[2])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
 	}
