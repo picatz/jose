@@ -17,7 +17,7 @@ name, _ := token.Claims.Get("name")
 ```go
 token := &jwt.Token{
 	Header: jws.Header{
-		header.Type:      header.TypeJWT,
+		header.Type:      jwt.Type,
 		header.Algorithm: jwa.HS256,
 	},
 	Claims: jwt.ClaimsSet{

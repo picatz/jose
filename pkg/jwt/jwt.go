@@ -21,10 +21,17 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// HeaderType "JWT" is used as the "typ" for all JSON Web Tokens.
+// Type "JWT" is the media type used by JSON Web Token (JWT).
 //
-// https://datatracker.ietf.org/doc/html/rfc7519#section-5.1
-const HeaderType header.ParamaterName = "JWT"
+// # Example
+//
+//	header := header.Parameters{
+//		header.Type:      jwt.Type,
+//		header.Algorithm: jwa.HS256,
+//	}
+//
+// https://www.rfc-editor.org/rfc/rfc7515.html#section-3.3
+const Type header.ParamaterName = "JWT"
 
 // Token is a decoded JSON Web Token, a string representing a
 // set of claims as a JSON object that is encoded in a JWS or

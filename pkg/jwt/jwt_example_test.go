@@ -24,7 +24,7 @@ var secretKeyBytes = []byte{
 func ExampleNew_symmetric() {
 	token, _ := jwt.New(
 		header.Parameters{
-			header.Type:      jwt.HeaderType,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		},
 		jwt.ClaimsSet{
@@ -47,7 +47,7 @@ func ExampleNew_asymmetric() {
 
 	token, _ := jwt.New(
 		header.Parameters{
-			header.Type:      jwt.HeaderType,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.RS256,
 		},
 		jwt.ClaimsSet{
