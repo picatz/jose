@@ -1053,3 +1053,28 @@ func splitToken(token string) ([3]string, error) {
 
 	return [3]string{parts[0], parts[1], parts[2]}, nil
 }
+
+// FromHTTPAuthorizationHeader extracts a JWT string from the Authorization header of an HTTP request.
+// If the Authorization header is not set, then an error is returned.
+//
+// # Warning
+//
+// This value needs to be parsed and verified before it can be used safely.
+func FromHTTPAuthorizationHeader(r *http.Request) (string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("missing authorization header")
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid authorization header format")
+	}
+
+	if strings.ToLower(parts[0]) != "bearer" {
+		return "", fmt.Errorf("invalid authorization header format")
+	}
+
+	return parts[1], nil
+}
+
