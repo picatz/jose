@@ -362,7 +362,7 @@ func WithAllowInsecureNoneAlgorithm(value bool) VerifyOption {
 // WithAllowedIssuers sets the allowed issuers for the JWT.
 func WithAllowedIssuers(issuers ...string) VerifyOption {
 	return func(vc *VerifyConfig) error {
-		vc.AllowedIssuers = append(vc.AllowedIssuers, issuers...)
+		vc.AllowedIssuers = issuers
 		return nil
 	}
 }
