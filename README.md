@@ -1,6 +1,12 @@
-# jose
+# JOSE [![Go Reference](https://pkg.go.dev/badge/github.com/picatz/jose.svg)](https://pkg.go.dev/github.com/picatz/jose) [![Go Report Card](https://goreportcard.com/badge/github.com/picatz/jose)](https://goreportcard.com/report/github.com/picatz/jose) [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0) 
 
 JavaScript Object Signing and Encryption ([JOSE](https://datatracker.ietf.org/wg/jose/documents/)) implemented in Go.
+
+## Installation
+
+```console
+$ go get github.com/picatz/jose@latest
+```
 
 ## Example Usage
 
