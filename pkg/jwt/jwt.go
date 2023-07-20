@@ -537,7 +537,7 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 	jwa.PS256: crypto.SHA256,
 	jwa.PS384: crypto.SHA384,
 	jwa.PS512: crypto.SHA512,
-	jwa.EdDSA: crypto.Hash(0), // no hashing for EdDSA
+	jwa.EdDSA: crypto.Hash(0), // no hashing option for EdDSA, Ed25519 enforced ( SHA512 only ).
 }
 
 // VerifySignature verifies the signature of the token using the
