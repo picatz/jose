@@ -23,7 +23,7 @@ name, _ := token.Claims.Get("name")
 ```go
 const (
 	symmetricKeyID = "test"
-	symmetricKey   = keyutil.NewSymmetricKey(64) 
+	symmetricKey   = "supersecret"
 )
 
 token, _ := jwt.New(
