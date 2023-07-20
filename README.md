@@ -13,11 +13,32 @@ $ go get github.com/picatz/jose@latest
 ```go
 raw := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM" 
 
-token, _ := jwt.ParseAndVerifyString(raw, jwt.WithKey("supersecret"))
+token, _ := jwt.ParseAndVerify(raw, jwt.WithKey("supersecret"))
 
 sub, _ := token.Claims.Get(jwt.Subject)
 iat, _ := token.Claims.Get(jwt.IssuedAt)
 name, _ := token.Claims.Get("name")
+```
+
+```go
+const (
+	symmetricKeyID = "test"
+	symmetricKey   = "supersecret"
+)
+
+token, _ := jwt.New(
+	header.Parameters{
+		header.Type:      jwt.Type,
+		header.Algorithm: jwa.HS256,
+	}, jwt.ClaimsSet{
+		jwt.Subject:           "1234567890",
+		jwk.KeyID:             symmetricKeyID,
+		jwt.ClaimName("name"): "John Doe",
+	},
+	symmetricKey,
+)
+
+_, err := jwt.ParseAndVerify(token.String(), jwt.WithIdentifiableKey(symmetricKeyID, symmetricKey))
 ```
 
 ```go
