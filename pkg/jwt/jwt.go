@@ -437,7 +437,7 @@ func WithKey[T VerifyKey](key T) VerifyOption {
 		}
 
 		// generate a random key ID
-		kid := make([]byte, 64)
+		kid := make([]byte, 16)
 		_, err := rand.Read(kid)
 		if err != nil {
 			return fmt.Errorf("failed to generate random key ID: %w", err)
