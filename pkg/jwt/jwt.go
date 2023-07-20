@@ -756,7 +756,7 @@ func (t *Token) VerifyHMACSignature(hash crypto.Hash, key any) error {
 	}
 
 	// Compare the signature to the token's signature.
-	if !hmac.Equal(t.Signature, []byte(sig)) {
+	if !hmac.Equal(t.Signature, sig) {
 		return fmt.Errorf("invalid HMAC signature")
 	}
 
