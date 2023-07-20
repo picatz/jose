@@ -21,7 +21,7 @@ jobs:
       - run: go test ./...
   fuzz:
     if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.changed_files, 'jwt/'))
-    timeout-minutes: 5
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
