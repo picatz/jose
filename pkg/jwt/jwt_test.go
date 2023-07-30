@@ -803,3 +803,26 @@ func BenchmarkParseString(b *testing.B) {
 		require.NoError(b, err)
 	}
 }
+
+var computeStringResult string
+
+func Benchmark_computeString(b *testing.B) {
+	t := &Token{
+		Header: header.Parameters{
+			header.Type:      "JWT",
+			header.Algorithm: jwa.RS256,
+		},
+		Claims: ClaimsSet{
+			Subject: "test",
+		},
+		Signature: []byte("feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ"),
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		computeStringResult = t.computeString()
+	}
+
+	b.StopTimer()
+}

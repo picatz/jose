@@ -147,32 +147,36 @@ func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Toke
 	return token, nil
 }
 
+const dot = "."
+const invalidHeader = "<invalid-header>."
+
 // computeString computes the string representation of the token,
 // which is used for signing and verifying the token.
 func (t *Token) computeString() string {
-	buff := bytes.NewBuffer(nil)
+	s := strings.Builder{}
 
 	header, err := t.Header.Base64URLString()
 	if err != nil {
-		buff.Write([]byte(fmt.Sprintf("<invalid-header %#+v>.", header)))
+		s.WriteString(invalidHeader)
 	} else {
-		buff.Write([]byte(header + "."))
+		s.WriteString(header)
+		s.WriteString(dot)
 	}
 
 	if len(t.Claims) > 0 {
-		buff.WriteString(t.Claims.String())
+		s.WriteString(t.Claims.String())
 	}
 
 	if len(t.Signature) != 0 {
-		buff.Write([]byte("."))
-		buff.WriteString(base64.Encode(t.Signature))
+		s.WriteString(dot)
+		s.WriteString(base64.Encode(t.Signature))
 	}
 
 	if len(t.raw) == 0 {
-		t.raw = buff.String()
+		t.raw = s.String()
 	}
 
-	return buff.String()
+	return s.String()
 }
 
 // String returns the string representation of the token, which is
