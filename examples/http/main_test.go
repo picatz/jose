@@ -6,17 +6,19 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"testing"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
 )
 
-func main() {
+func Test_main(t *testing.T) {
 	// Create a public/private key pair (ECDSA)
 	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		panic(err)
+		t.Fatalf("failed to generate key pair: %v", err)
 	}
 
 	// Create a JWT token, sign it with the private key.
@@ -35,7 +37,6 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Starting Example Server\n")
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -72,10 +73,14 @@ func main() {
 		w.Write([]byte(fmt.Sprintf("Welcome back, %s!", name)))
 	})
 
-	fmt.Printf("Listening on http://127.0.0.1:8080\n")
+	rec := httptest.NewRecorder()
 
-	// Print out the curl command to test the server
-	fmt.Printf("\nTry running in another terminal:\ncurl http://127.0.0.1:8080 -H 'Authorization: Bearer %s' -v\n\n", token)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token.String())
 
-	panic(http.ListenAndServe("127.0.0.1:8080", mux))
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, rec.Code)
+	}
 }

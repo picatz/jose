@@ -11,65 +11,72 @@ $ go get github.com/picatz/jose@latest
 ## Example Usage
 
 ```go
-raw := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM" 
-
-token, _ := jwt.ParseAndVerify(raw, jwt.WithKey("supersecret"))
-
-sub, _ := token.Claims.Get(jwt.Subject)
-iat, _ := token.Claims.Get(jwt.IssuedAt)
-name, _ := token.Claims.Get("name")
-```
-
-```go
-const (
-	symmetricKeyID = "test"
-	symmetricKey   = "supersecret"
-)
-
-token, _ := jwt.New(
-	header.Parameters{
-		header.Type:      jwt.Type,
-		header.Algorithm: jwa.HS256,
-	}, jwt.ClaimsSet{
-		jwt.Subject:           "1234567890",
-		jwk.KeyID:             symmetricKeyID,
-		jwt.ClaimName("name"): "John Doe",
-	},
-	symmetricKey,
-)
-
-_, err := jwt.ParseAndVerify(token.String(), jwt.WithIdentifiableKey(symmetricKeyID, symmetricKey))
-```
-
-```go
-token := &jwt.Token{
-	Header: jws.Header{
-		header.Type:      jwt.Type,
-		header.Algorithm: jwa.HS256,
-	},
-	Claims: jwt.ClaimsSet{
-		jwt.Subject:  "1234567890",
-		jwt.Issuer:   "test",
-		jwt.IssuedAt: time.Now(),
-	},
+// Create a public/private key pair (ECDSA)
+private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+if err != nil {
+	panic(err)
 }
 
-signature, err := token.Sign("supersecret")
+// Create a JWT token, sign it with the private key.
+token, err := jwt.New(
+	header.Parameters{
+		header.Type:      jwt.Type,
+		header.Algorithm: jwa.ES256,
+	},
+	jwt.ClaimsSet{
+		"sub":  "1234567890",
+		"name": "John Doe",
+	},
+	private,
+)
+if err != nil {
+	panic(err)
+}
 
-fmt.Println(token)
-// eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9Cg.eyJpYXQiOiIyMDIyLTAyLTE3VDAxOjI5OjQyLjkwMzAzMTY3NFoiLCJpc3MiOiJ0ZXN0Iiwic3ViIjoiMTIzNDU2Nzg5MCJ9Cg.hV13TckmXoXIL1-7gUhZNFvDgGJe7y5EVKpWzmWlvx0
-```
+mux := http.NewServeMux()
 
-```go
-token, _ := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
+mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := jwt.FromHTTPAuthorizationHeader(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-err := token.VerifySignature(ecdsaPublicKey)
-```
+	token, err = jwt.ParseAndVerify(bearerToken, jwt.WithKey(&private.PublicKey))
+	if err != nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 
-```go
-token, _ := jwt.ParseString("eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg")
+	sub, err := token.Claims.Get(jwt.Subject)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-err := token.VerifySignature(rsaPublicKey)
+	if sub != "1234567890" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	name, err := token.Claims.Get("name")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(fmt.Sprintf("Welcome back, %s!", name)))
+})
+
+fmt.Println("Listening on http://127.0.0.1:8080")
+
+fmt.Printf("Try running: curl http://127.0.0.1:8080 -H 'Authorization: Bearer %s' -v\n", token)
+
+err = http.ListenAndServe("127.0.0.1:8080", mux)
+if err != nil {
+	panic(err)
+}
 ```
 
 ## RFCs
