@@ -260,7 +260,11 @@ MC4CAQAwBQYDK2VwBCIEIFdZWoDdFny5SMnP9Fyfr8bafi/B527EVZh8JJjDTIFO
 	}()
 )
 
+// newToken returns a new token value with the given parameters, claims, and key.
+// If the key is not a supported type, an error is returned.
 func newToken(t *testing.T, params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
+	t.Helper()
+
 	var (
 		token *Token
 		err   error
