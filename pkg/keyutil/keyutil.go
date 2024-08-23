@@ -160,6 +160,7 @@ func ParseECDSAPrivateKey(r io.Reader) (*ecdsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
+// ParseEdDSAPublicKey parses the PEM encoded Ed25519 public key from the given reader.
 func ParseEdDSAPublicKey(r io.Reader) (ed25519.PublicKey, error) {
 	keyBytes, err := io.ReadAll(r)
 	if err != nil {
@@ -186,6 +187,7 @@ func ParseEdDSAPublicKey(r io.Reader) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(asn1PubKey.PublicKey.Bytes), nil
 }
 
+// ParseEdDSAPrivateKey parses the PEM encoded Ed25519 private key from the given reader.
 func ParseEdDSAPrivateKey(r io.Reader) (ed25519.PrivateKey, error) {
 	keyBytes, err := io.ReadAll(r)
 	if err != nil {
@@ -218,7 +220,8 @@ func ParseEdDSAPrivateKey(r io.Reader) (ed25519.PrivateKey, error) {
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
-func ParsePrivateKey(r io.Reader) (interface{}, error) {
+// ParsePrivateKey parses the PEM encoded private key from the given reader.
+func ParsePrivateKey(r io.Reader) (any, error) {
 	keyBytes, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key from reader: %w", err)
@@ -254,7 +257,8 @@ func ParsePrivateKey(r io.Reader) (interface{}, error) {
 	return nil, fmt.Errorf("failed to parse private key, unknown type")
 }
 
-func ParsePublicKey(r io.Reader) (interface{}, error) {
+// ParsePublicKey parses the PEM encoded public key from the given reader.
+func ParsePublicKey(r io.Reader) (any, error) {
 	keyBytes, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key from reader: %w", err)
@@ -296,6 +300,7 @@ func ParsePublicKey(r io.Reader) (interface{}, error) {
 	return nil, fmt.Errorf("failed to parse public key, unknown type")
 }
 
+// NewRSAKeyPair returns a new RSA key pair, or an error if one occurs.
 func NewRSAKeyPair() (*rsa.PublicKey, *rsa.PrivateKey, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -305,6 +310,7 @@ func NewRSAKeyPair() (*rsa.PublicKey, *rsa.PrivateKey, error) {
 	return &privateKey.PublicKey, privateKey, nil
 }
 
+// NewECDSAKeyPair returns a new ECDSA key pair, or an error if one occurs.
 func NewECDSAKeyPair() (*ecdsa.PublicKey, *ecdsa.PrivateKey, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -314,6 +320,7 @@ func NewECDSAKeyPair() (*ecdsa.PublicKey, *ecdsa.PrivateKey, error) {
 	return &privateKey.PublicKey, privateKey, nil
 }
 
+// NewEdDSAKeyPair returns a new EdDSA key pair, or an error if one occurs.
 func NewEdDSAKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
