@@ -44,7 +44,7 @@ func ParseRSAPublicKey(r io.Reader) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode RSA Public key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
@@ -76,7 +76,7 @@ func ParseRSAPrivateKey(r io.Reader) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("failed to decode RSA private key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
@@ -108,7 +108,7 @@ func ParseECDSAPublicKey(r io.Reader) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode ECDSA Public key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
@@ -140,7 +140,7 @@ func ParseECDSAPrivateKey(r io.Reader) (*ecdsa.PrivateKey, error) {
 		return nil, fmt.Errorf("failed to decode ECDSA private key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
@@ -229,7 +229,7 @@ func ParsePrivateKey(r io.Reader) (interface{}, error) {
 		return nil, fmt.Errorf("failed to decode private key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err == nil {
@@ -265,7 +265,7 @@ func ParsePublicKey(r io.Reader) (interface{}, error) {
 		return nil, fmt.Errorf("failed to decode private key PEM block: %w", err)
 	}
 
-	var parsedKey interface{}
+	var parsedKey any
 
 	parsedKey, err = x509.ParsePKIXPublicKey(block.Bytes)
 	if err == nil {
