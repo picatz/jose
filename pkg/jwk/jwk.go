@@ -26,25 +26,29 @@ type (
 )
 
 const (
-	KeyType              ParamaterName = "kty"
-	PublicKeyUse         ParamaterName = "use"
-	KeyOperations        ParamaterName = "key_ops"
-	Algorithm            ParamaterName = "alg"
-	KeyID                ParamaterName = "kid"
-	X509URL              ParamaterName = "x5u"
-	X509CertificateChain ParamaterName = "x5c"
-	X509SHA1Thumbprint   ParamaterName = "x5t"
-	X509SHA256Thumbprint ParamaterName = "x5t#S256"
+	KeyType              ParamaterName = "kty"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.1
+	PublicKeyUse         ParamaterName = "use"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
+	KeyOperations        ParamaterName = "key_ops"  // https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
+	Algorithm            ParamaterName = "alg"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
+	KeyID                ParamaterName = "kid"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.5
+	X509URL              ParamaterName = "x5u"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.6
+	X509CertificateChain ParamaterName = "x5c"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.7
+	X509SHA1Thumbprint   ParamaterName = "x5t"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.8
+	X509SHA256Thumbprint ParamaterName = "x5t#S256" // https://datatracker.ietf.org/doc/html/rfc7517#section-4.9
 
+	// K is the symmetric key value within a JWK.
+	// https://datatracker.ietf.org/doc/html/rfc7517#appendix-A.3
 	K Symmetric = "k"
 
+	// Curve is the curve value within an ECDSA JWK, such as "P-256".
+	// https://datatracker.ietf.org/doc/html/rfc7517#appendix-A.3
 	Curve ECDSA = "crv"
-	X     ECDSA = "x"
-	Y     ECDSA = "y"
+	X     ECDSA = "x" // X is the x-coordinate for the elliptic curve point.
+	Y     ECDSA = "y" // Y is the y-coordinate for the elliptic curve point.
 
-	N RSA = "n"
-	E RSA = "e"
-	D RSA = "d"
+	N RSA = "n" // N is the RSA public modulus value.
+	E RSA = "e" // E is the RSA public exponent value.
+	D RSA = "d" // D is the RSA private exponent value.
 )
 
 // Values is a JSON object containing the parameters describing

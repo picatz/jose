@@ -2,14 +2,17 @@ name: "Scan"
 
 on:
   push:
-    branches: [main]
+    branches:
+      - "main"
   pull_request:
-    branches: [main]
+    branches:
+      - "main"
   schedule:
     - cron: "0 9 * * *"
 
 jobs:
   codeql:
+    name: "CodeQL"
     runs-on: ubuntu-latest
 
     permissions:
@@ -17,27 +20,29 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Initialize 
-        uses: github/codeql-action/init@v2
+        uses: github/codeql-action/init@v3
 
       - name: Build
-        uses: github/codeql-action/autobuild@v2
+        uses: github/codeql-action/autobuild@v3
 
       - name: Analyze 
-        uses: github/codeql-action/analyze@v2
+        uses: github/codeql-action/analyze@v3
+
   osv:
+    name: "OSV"
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # until https://github.com/google/osv-scanner/pull/432 is merged
       - uses: actions/setup-go@v4
         with:
-          go-version: 1.20.x
+          go-version-file: go.mod
 
       - name: Install 
         run: |
