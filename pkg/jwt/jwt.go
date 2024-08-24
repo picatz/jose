@@ -1,7 +1,6 @@
 package jwt
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -13,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,7 +20,6 @@ import (
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
-	"golang.org/x/exp/slices"
 )
 
 // Type "JWT" is the media type used by JSON Web Token (JWT).
@@ -64,7 +63,7 @@ type Token struct {
 	// that is used to validate the JWT.
 	Signature []byte
 
-	// Raw is the (original) string representation of the JWT.
+	// raw is the (original) string representation of the JWT.
 	raw string
 }
 
@@ -237,7 +236,7 @@ type Parseable interface {
 // # Warning
 //
 // This is a low-level function that does not verify the
-// signature of the token. Use ParseAndVerify to parse
+// signature of the token. Use [ParseAndVerify] to parse
 // and verify the signature of a token in one step.
 // Otherwise, use Parse to parse a token, and then
 // use the VerifySignature method to verify the signature.
@@ -272,61 +271,73 @@ func ParseAndVerify[T Parseable](input T, veryifyOptions ...VerifyOption) (*Toke
 // Otherwise, use Parse to parse a token, and then
 // use the VerifySignature method to verify the signature.
 func ParseString(input string) (*Token, error) {
-	token := &Token{}
-
-	token.raw = input
-
+	// First, we split our input into three parts, separated by dots.
 	parts, err := splitToken(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split token: %w", err)
 	}
 
+	// Next, we decode the header base64 content.
 	b, err := base64.Decode(parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
 	}
+
+	// Decode the header JSON.
 	h := jws.Header{}
-	err = json.NewDecoder(bytes.NewReader(b)).Decode(&h)
+	err = json.Unmarshal(b, &h)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
 	}
-	token.Header = h
 
-	// ensure using JWA types instead of raw string
-	if _, ok := token.Header[header.Algorithm]; ok {
-		token.Header[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", token.Header[header.Algorithm]))
+	// Ensure we're using JWA types instead of raw string values.
+	if _, ok := h[header.Algorithm]; ok {
+		h[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", h[header.Algorithm]))
 	}
 
+	// Next, we decode the claims base64 content.
 	b, err = base64.Decode(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
 	}
+
+	// Decode the claims JSON.
 	claims := ClaimsSet{}
-	err = json.NewDecoder(bytes.NewReader(b)).Decode(&claims)
+	err = json.Unmarshal(b, &claims)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
 	}
-	token.Claims = claims
 
-	for claimName, claimValue := range token.Claims {
+	for claimName, claimValue := range claims {
 		// parsing JSON values into an interface can be tricky
 		switch claimName {
 		case IssuedAt, ExpirationTime, NotBefore:
 			switch v := claimValue.(type) {
 			case int64: // good
 			case float64: // ok
-				token.Claims[claimName] = int64(v)
+				claims[claimName] = int64(v)
 			default: // bad
 				return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
 			}
 		}
 	}
 
+	// Lastly, we decode the signature base64 content.
 	b, err = base64.Decode(parts[2])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
 	}
-	token.Signature = b
+
+	// Create a new token object, with the header and raw input string.
+	//
+	// We've deferred allocating this object until now, because we
+	// didn't want to allocate it if we were going to return an error.
+	token := &Token{
+		Header:    h,
+		Claims:    claims,
+		Signature: b,
+		raw:       input,
+	}
 
 	return token, nil
 }
