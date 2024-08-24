@@ -20,7 +20,7 @@ jobs:
           go-version-file: go.mod
       - run: go test ./...
   fuzz:
-    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.changed_files, 'jwt/'))
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.changed_files, 'pkg/jwt/'))
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
