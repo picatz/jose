@@ -2,8 +2,10 @@ package keyutil
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
-	"fmt"
+	"crypto/rsa"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -170,87 +172,135 @@ func TestParseEdDSAPrivateKey(t *testing.T) {
 
 func TestParsePrivateKey(t *testing.T) {
 	tests := []struct {
-		Name  string
-		Key   []byte
-		Type  string
-		Error bool
+		name  string
+		key   []byte
+		check func(t *testing.T, key any, err error)
 	}{
 		{
-			Name: "RS256",
-			Key:  testRSAPrivateKey,
-			Type: "*rsa.PrivateKey",
+			name: "RS256",
+			key:  testRSAPrivateKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				rsaKey, ok := key.(*rsa.PrivateKey)
+				require.True(t, ok)
+				require.NotNil(t, rsaKey)
+				require.Equal(t, 256, rsaKey.Size())
+				require.NotNil(t, rsaKey.D)
+				require.NotNil(t, rsaKey.N)
+				require.NotZero(t, rsaKey.E)
+				require.NotEmpty(t, rsaKey.Primes)
+				require.NotNil(t, rsaKey.PublicKey)
+				require.Equal(t, 256, rsaKey.PublicKey.Size())
+				require.Equal(t, 65537, rsaKey.PublicKey.E)
+				require.NotZero(t, rsaKey.PublicKey.N)
+			},
 		},
 		{
-			Name: "ES256",
-			Key:  testECDSAPrivateKey,
-			Type: "*ecdsa.PrivateKey",
+			name: "ES256",
+			key:  testECDSAPrivateKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				ecdsaKey, ok := key.(*ecdsa.PrivateKey)
+				require.True(t, ok)
+				require.NotNil(t, ecdsaKey)
+				require.Equal(t, elliptic.P256(), ecdsaKey.Curve)
+				require.NotZero(t, ecdsaKey.D)
+				require.NotZero(t, ecdsaKey.X)
+				require.NotZero(t, ecdsaKey.Y)
+			},
 		},
 		{
-			Name: "EdDSA",
-
-			Key:  testEdDSAPrivateKey,
-			Type: "ed25519.PrivateKey",
+			name: "EdDSA",
+			key:  testEdDSAPrivateKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				edKey, ok := key.(ed25519.PrivateKey)
+				require.True(t, ok)
+				require.NotEmpty(t, edKey)
+			},
 		},
 		{
-			Name:  "invalid",
-			Key:   []byte("..."),
-			Error: true,
+			name: "invalid",
+			key:  []byte("..."),
+			check: func(t *testing.T, key any, err error) {
+				require.Error(t, err)
+				require.Nil(t, key)
+			},
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			key, err := ParsePrivateKey(bytes.NewReader(test.Key))
-			if test.Error {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, key)
-				require.Equal(t, test.Type, fmt.Sprintf("%T", key))
-			}
+		t.Run(test.name, func(t *testing.T) {
+			key, err := ParsePrivateKey(bytes.NewReader(test.key))
+
+			test.check(t, key, err)
 		})
 	}
 }
 
 func TestParsePublicKey(t *testing.T) {
 	tests := []struct {
-		Name  string
-		Key   []byte
-		Type  string
-		Error bool
+		name  string
+		key   []byte
+		check func(t *testing.T, key any, err error)
 	}{
 		{
-			Name: "RS256",
-			Key:  testRSAPublicKey,
-			Type: "*rsa.PublicKey",
+			name: "RS256",
+			key:  testRSAPublicKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				rsaKey, ok := key.(*rsa.PublicKey)
+				require.True(t, ok)
+				require.NotNil(t, rsaKey)
+				require.Equal(t, 256, rsaKey.Size())
+				require.Equal(t, 65537, rsaKey.E)
+				require.NotZero(t, rsaKey.N)
+			},
 		},
 		{
-			Name: "ES256",
-			Key:  testECDSAPublicKey,
-			Type: "*ecdsa.PublicKey",
+			name: "ES256",
+			key:  testECDSAPublicKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				ecdsaKey, ok := key.(*ecdsa.PublicKey)
+				require.True(t, ok)
+				require.NotNil(t, ecdsaKey)
+				require.Equal(t, elliptic.P256(), ecdsaKey.Curve)
+				require.NotZero(t, ecdsaKey.X)
+				require.NotZero(t, ecdsaKey.Y)
+			},
 		},
 		{
-			Name: "EdDSA",
-			Key:  testEdDSAPublicKey,
-			Type: "ed25519.PublicKey",
+			name: "EdDSA",
+			key:  testEdDSAPublicKey,
+			check: func(t *testing.T, key any, err error) {
+				require.NoError(t, err)
+				require.NotNil(t, key)
+				edKey, ok := key.(ed25519.PublicKey)
+				require.True(t, ok)
+				require.NotEmpty(t, edKey)
+			},
 		},
 		{
-			Name:  "invalid",
-			Key:   []byte("..."),
-			Error: true,
+			name: "invalid",
+			key:  []byte("..."),
+			check: func(t *testing.T, key any, err error) {
+				require.Error(t, err)
+				require.Nil(t, key)
+			},
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			key, err := ParsePublicKey(bytes.NewReader(test.Key))
-			if test.Error {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, key)
-				require.Equal(t, test.Type, fmt.Sprintf("%T", key))
-			}
+		t.Run(test.name, func(t *testing.T) {
+			key, err := ParsePublicKey(bytes.NewReader(test.key))
+
+			test.check(t, key, err)
 		})
 	}
 }
