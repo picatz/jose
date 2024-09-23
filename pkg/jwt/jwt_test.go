@@ -1,4 +1,4 @@
-package jwt
+package jwt_test
 
 import (
 	"crypto"
@@ -6,10 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rsa"
-	"crypto/x509"
-	"encoding/asn1"
-	"encoding/pem"
-	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,9 +14,38 @@ import (
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
+	"github.com/picatz/jose/pkg/jwt"
+	"github.com/picatz/jose/pkg/keyutil"
 
 	"github.com/stretchr/testify/require"
 )
+
+// keyPair is a simple struct that holds a public and private key
+// of any type.
+type keyPair[P, S any] struct {
+	public  P // Public key.
+	private S // Private (secret) key.
+}
+
+// keySource is a function that returns a public and private key pair
+// of any type. This works nicely with the keyutil package's functions.
+type keySource[P, S any] func() (P, S, error)
+
+// testNewKeyPair is a helper function that creates a new key pair
+// from the given source function. It returns the new key pair that
+// can be used in tests to sign (private key) and verify (public key)
+// tokens that are created.
+func testNewKeyPair[P, S any](t *testing.T, source keySource[P, S]) *keyPair[P, S] {
+	t.Helper()
+
+	public, private, err := source()
+	require.NoError(t, err)
+
+	return &keyPair[P, S]{
+		public:  public,
+		private: private,
+	}
+}
 
 // https://www.rfc-editor.org/rfc/rfc7515.html#appendix-A.1
 var testHMACSecretKey = []byte{
@@ -30,353 +56,172 @@ var testHMACSecretKey = []byte{
 	208, 128, 163,
 }
 
-// Test RSA and ECDSA key-pairs cribbed lovingly from https://github.com/dgrijalva/jwt-go
-var (
-	testRSASHA256PublicKey = func() *rsa.PublicKey {
-		var key = []byte(`
------BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4f5wg5l2hKsTeNem/V41
-fGnJm6gOdrj8ym3rFkEU/wT8RDtnSgFEZOQpHEgQ7JL38xUfU0Y3g6aYw9QT0hJ7
-mCpz9Er5qLaMXJwZxzHzAahlfA0icqabvJOMvQtzD6uQv6wPEyZtDTWiQi9AXwBp
-HssPnpYGIn20ZZuNlX2BrClciHhCPUIIZOQn/MmqTD31jSyjoQoV7MhhMTATKJx2
-XrHhR+1DcKJzQBSTAGnpYVaqpsARap+nwRipr3nUTuxyGohBTSmjJ2usSeQXHI3b
-ODIRe1AuTyHceAbewn8b462yEWKARdpd9AjQW5SIVPfdsz5B6GlYQ5LdYKtznTuy
-7wIDAQAB
------END PUBLIC KEY-----
-	`)
-
-		var err error
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to decode test RSA public key"))
-		}
-
-		// Parse the key
-		var parsedKey interface{}
-		if parsedKey, err = x509.ParsePKIXPublicKey(block.Bytes); err != nil {
-			if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
-				parsedKey = cert.PublicKey
-			} else {
-				panic(fmt.Errorf("failed to parse test RSA public key: %w", err))
-			}
-		}
-
-		var pkey *rsa.PublicKey
-		var ok bool
-		if pkey, ok = parsedKey.(*rsa.PublicKey); !ok {
-			panic(fmt.Errorf("parsed RSA public key %T is invalid", parsedKey))
-		}
-
-		return pkey
-	}()
-
-	testRSASHA256PrviateKey = func() *rsa.PrivateKey {
-		var key = []byte(`
------BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEA4f5wg5l2hKsTeNem/V41fGnJm6gOdrj8ym3rFkEU/wT8RDtn
-SgFEZOQpHEgQ7JL38xUfU0Y3g6aYw9QT0hJ7mCpz9Er5qLaMXJwZxzHzAahlfA0i
-cqabvJOMvQtzD6uQv6wPEyZtDTWiQi9AXwBpHssPnpYGIn20ZZuNlX2BrClciHhC
-PUIIZOQn/MmqTD31jSyjoQoV7MhhMTATKJx2XrHhR+1DcKJzQBSTAGnpYVaqpsAR
-ap+nwRipr3nUTuxyGohBTSmjJ2usSeQXHI3bODIRe1AuTyHceAbewn8b462yEWKA
-Rdpd9AjQW5SIVPfdsz5B6GlYQ5LdYKtznTuy7wIDAQABAoIBAQCwia1k7+2oZ2d3
-n6agCAbqIE1QXfCmh41ZqJHbOY3oRQG3X1wpcGH4Gk+O+zDVTV2JszdcOt7E5dAy
-MaomETAhRxB7hlIOnEN7WKm+dGNrKRvV0wDU5ReFMRHg31/Lnu8c+5BvGjZX+ky9
-POIhFFYJqwCRlopGSUIxmVj5rSgtzk3iWOQXr+ah1bjEXvlxDOWkHN6YfpV5ThdE
-KdBIPGEVqa63r9n2h+qazKrtiRqJqGnOrHzOECYbRFYhexsNFz7YT02xdfSHn7gM
-IvabDDP/Qp0PjE1jdouiMaFHYnLBbgvlnZW9yuVf/rpXTUq/njxIXMmvmEyyvSDn
-FcFikB8pAoGBAPF77hK4m3/rdGT7X8a/gwvZ2R121aBcdPwEaUhvj/36dx596zvY
-mEOjrWfZhF083/nYWE2kVquj2wjs+otCLfifEEgXcVPTnEOPO9Zg3uNSL0nNQghj
-FuD3iGLTUBCtM66oTe0jLSslHe8gLGEQqyMzHOzYxNqibxcOZIe8Qt0NAoGBAO+U
-I5+XWjWEgDmvyC3TrOSf/KCGjtu0TSv30ipv27bDLMrpvPmD/5lpptTFwcxvVhCs
-2b+chCjlghFSWFbBULBrfci2FtliClOVMYrlNBdUSJhf3aYSG2Doe6Bgt1n2CpNn
-/iu37Y3NfemZBJA7hNl4dYe+f+uzM87cdQ214+jrAoGAXA0XxX8ll2+ToOLJsaNT
-OvNB9h9Uc5qK5X5w+7G7O998BN2PC/MWp8H+2fVqpXgNENpNXttkRm1hk1dych86
-EunfdPuqsX+as44oCyJGFHVBnWpm33eWQw9YqANRI+pCJzP08I5WK3osnPiwshd+
-hR54yjgfYhBFNI7B95PmEQkCgYBzFSz7h1+s34Ycr8SvxsOBWxymG5zaCsUbPsL0
-4aCgLScCHb9J+E86aVbbVFdglYa5Id7DPTL61ixhl7WZjujspeXZGSbmq0Kcnckb
-mDgqkLECiOJW2NHP/j0McAkDLL4tysF8TLDO8gvuvzNC+WQ6drO2ThrypLVZQ+ry
-eBIPmwKBgEZxhqa0gVvHQG/7Od69KWj4eJP28kq13RhKay8JOoN0vPmspXJo1HY3
-CKuHRG+AP579dncdUnOMvfXOtkdM4vk0+hWASBQzM9xzVcztCa+koAugjVaLS9A+
-9uQoqEeVNTckxx0S2bYevRy7hGQmUJTyQm3j1zEUR5jpdbL83Fbq
------END RSA PRIVATE KEY-----
-	`)
-
-		var err error
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to decode RSA private key PEM block: %w", err))
-		}
-
-		var parsedKey interface{}
-		if parsedKey, err = x509.ParsePKCS1PrivateKey(block.Bytes); err != nil {
-			if parsedKey, err = x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
-				panic(fmt.Errorf("failed to decode RSA private key: %w", err))
-			}
-		}
-
-		var pkey *rsa.PrivateKey
-		var ok bool
-		if pkey, ok = parsedKey.(*rsa.PrivateKey); !ok {
-			panic(fmt.Errorf("parsed RSA private key %T is invalid", parsedKey))
-		}
-
-		return pkey
-	}()
-
-	testECDSAPublicKey = func() *ecdsa.PublicKey {
-		key := []byte(`
------BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEYD54V/vp+54P9DXarYqx4MPcm+HK
-RIQzNasYSoRQHQ/6S6Ps8tpMcT+KvIIC8W/e9k0W7Cm72M1P9jU7SLf/vg==
------END PUBLIC KEY-----
-	`)
-
-		var err error
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to parse ECDSA public key PEM block"))
-		}
-
-		// Parse the key
-		var parsedKey interface{}
-		if parsedKey, err = x509.ParsePKIXPublicKey(block.Bytes); err != nil {
-			cert, err := x509.ParseCertificate(block.Bytes)
-
-			if err != nil {
-				panic(err)
-			}
-			parsedKey = cert.PublicKey
-		}
-
-		var pkey *ecdsa.PublicKey
-		var ok bool
-		if pkey, ok = parsedKey.(*ecdsa.PublicKey); !ok {
-			panic(fmt.Errorf("invalid parsed ECDSA public key type: %T", parsedKey))
-		}
-
-		return pkey
-	}()
-
-	testECDSAPrivateKey = func() *ecdsa.PrivateKey {
-		key := []byte(`
------BEGIN EC PRIVATE KEY-----
-MHcCAQEEIAh5qA3rmqQQuu0vbKV/+zouz/y/Iy2pLpIcWUSyImSwoAoGCCqGSM49
-AwEHoUQDQgAEYD54V/vp+54P9DXarYqx4MPcm+HKRIQzNasYSoRQHQ/6S6Ps8tpM
-cT+KvIIC8W/e9k0W7Cm72M1P9jU7SLf/vg==
------END EC PRIVATE KEY-----
-	`)
-
-		var err error
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to parse ECDSA private key PEM block"))
-		}
-
-		// Parse the key
-		var parsedKey interface{}
-		if parsedKey, err = x509.ParseECPrivateKey(block.Bytes); err != nil {
-			if parsedKey, err = x509.ParsePKCS8PrivateKey(block.Bytes); err != nil {
-				panic(fmt.Errorf("failed to parse ECDSA private key: %w", err))
-			}
-		}
-
-		var pkey *ecdsa.PrivateKey
-		var ok bool
-		pkey, ok = parsedKey.(*ecdsa.PrivateKey)
-		if !ok {
-			panic(fmt.Errorf("invalid parsed ECDSA private key type: %T", parsedKey))
-		}
-
-		return pkey
-	}()
-
-	testEdDSAPublicKey = func() ed25519.PublicKey {
-		key := []byte(`
------BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAzpgjKSr9E032DX+foiOxq1QDsbzjLxagTN+yVpGWZB4=
------END PUBLIC KEY-----
-	`)
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to parse EdDSA public key PEM block"))
-		}
-
-		// Parse the key
-		asn1PubKey := struct {
-			ObjectIdentifier struct {
-				ObjectIdentifier asn1.ObjectIdentifier
-			}
-			PublicKey asn1.BitString
-		}{}
-
-		if _, err := asn1.Unmarshal(block.Bytes, &asn1PubKey); err != nil {
-			panic(fmt.Errorf("failed to parse EdDSA public key ANS.1"))
-		}
-
-		return ed25519.PublicKey(asn1PubKey.PublicKey.Bytes)
-	}()
-
-	testEdDSAPrivateKey = func() ed25519.PrivateKey {
-		key := []byte(`
------BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIFdZWoDdFny5SMnP9Fyfr8bafi/B527EVZh8JJjDTIFO
------END PRIVATE KEY-----
-	`)
-
-		// Parse PEM block
-		var block *pem.Block
-		if block, _ = pem.Decode(key); block == nil {
-			panic(fmt.Errorf("failed to parse EdDSA private key PEM block"))
-		}
-
-		asn1PrivKey := struct {
-			Version          int
-			ObjectIdentifier struct {
-				ObjectIdentifier asn1.ObjectIdentifier
-			}
-			PrivateKey []byte
-		}{}
-
-		if _, err := asn1.Unmarshal(block.Bytes, &asn1PrivKey); err != nil {
-			panic(fmt.Errorf("failed to parse EdDSA private key ANS.1"))
-		}
-
-		seed := asn1PrivKey.PrivateKey[2:]
-		if len(seed) != ed25519.SeedSize {
-			panic(fmt.Errorf("invalid EdDSA seed length: %d", len(seed)))
-		}
-
-		return ed25519.NewKeyFromSeed(seed)
-	}()
-)
-
-// newToken returns a new token value with the given parameters, claims, and key.
+// testToken returns a new token value with the given parameters, claims, and key.
 // If the key is not a supported type, an error is returned.
-func newToken(t *testing.T, params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
+func testToken(t *testing.T, params header.Parameters, claims jwt.ClaimsSet, key any) *jwt.Token {
 	t.Helper()
 
 	var (
-		token *Token
+		token *jwt.Token
 		err   error
 	)
 
 	switch key := key.(type) {
 	case *rsa.PrivateKey:
-		token, err = New(params, claims, key)
+		token, err = jwt.New(params, claims, key)
 	case *ecdsa.PrivateKey:
-		token, err = New(params, claims, key)
+		token, err = jwt.New(params, claims, key)
 	case ed25519.PrivateKey:
-		token, err = New(params, claims, key)
+		token, err = jwt.New(params, claims, key)
 	case []byte:
-		token, err = New(params, claims, key)
+		token, err = jwt.New(params, claims, key)
 	case string:
-		token, err = New(params, claims, key)
+		token, err = jwt.New(params, claims, key)
 	default:
-		return nil, fmt.Errorf("unsupported signing key type: %T", key)
+		t.Fatalf("potentially unsupported signing key type: %T", key)
 	}
 
-	return token, err
+	require.NoError(t, err)
+	require.NotNil(t, token)
+
+	return token
 }
 
 func TestTokenString(t *testing.T) {
-	token := &Token{
+	token := &jwt.Token{
 		Header: jws.Header{
-			header.Type:      Type,
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
 		},
-		Claims: ClaimsSet{
-			Subject: "test",
-			Issuer:  "test",
+		Claims: jwt.ClaimsSet{
+			jwt.Subject: "test",
+			jwt.Issuer:  "test",
 		},
 	}
 
 	t.Logf("before sign: %s", token)
+
+	require.Equal(t, 1, strings.Count(token.String(), "."))
+	require.Empty(t, token.Signature)
+	require.True(t, strings.HasPrefix(token.String(), "eyJ"))
 
 	sig, err := token.Sign(testHMACSecretKey)
 	require.NoError(t, err)
 	require.NotEmpty(t, sig)
 
 	t.Logf("after sign: %s", token)
+
+	require.Equal(t, 2, strings.Count(token.String(), "."))
+	require.NotEmpty(t, token.Signature)
+	require.True(t, strings.HasPrefix(token.String(), "eyJ"))
 }
 
 func TestParseStringAndVerify(t *testing.T) {
+	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+	eddsaKeyPair := testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+
+	rsaToken := testToken(t,
+		header.Parameters{
+			header.Type:      jwt.Type,
+			header.Algorithm: jwa.RS256,
+		},
+		jwt.ClaimsSet{
+			jwt.Subject: "test",
+			jwt.Issuer:  "test",
+		},
+		rsaKeyPair.private,
+	)
+
+	ecdsaToken := testToken(t,
+		header.Parameters{
+			header.Type:      jwt.Type,
+			header.Algorithm: jwa.ES256,
+		},
+		jwt.ClaimsSet{
+			jwt.Subject: "test",
+			jwt.Issuer:  "test",
+		},
+		ecdsaKeyPair.private,
+	)
+
+	eddsaToken := testToken(t,
+		header.Parameters{
+			header.Type:      jwt.Type,
+			header.Algorithm: jwa.EdDSA,
+		},
+		jwt.ClaimsSet{
+			jwt.Subject: "test",
+			jwt.Issuer:  "test",
+		},
+		eddsaKeyPair.private,
+	)
+
 	tests := []struct {
-		Name    string
-		Input   string
-		Error   bool
-		Require func(t *testing.T, token *Token)
+		name  string
+		input string
+		check func(t *testing.T, token *jwt.Token, err error)
 	}{
 		{
-			Name:  "emtpy",
-			Error: true,
+			name: "emtpy",
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.Error(t, err)
+				require.Nil(t, token)
+			},
 		},
 		{
-			Name:  "invalid data",
-			Input: "eqwfixwjwwkgjiw.ufo....",
-			Error: true,
+			name:  "invalid data",
+			input: "eqwfixwjwwkgjiw.ufo....",
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.Error(t, err)
+				require.Nil(t, token)
+			},
 		},
 		{
-			Name:  "JOSE header with claims and ECDSA SHA256 signature",
-			Input: "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ",
-			Error: false,
-			Require: func(t *testing.T, token *Token) {
+			name:  "JOSE header with claims and ECDSA SHA256 signature",
+			input: ecdsaToken.String(),
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.NoError(t, err)
 				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, Type, token.Header[header.Type])
+				require.Equal(t, jwt.Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
 
-				sig, err := token.ECDSASignature(crypto.SHA256, testECDSAPrivateKey)
+				sig, err := token.ECDSASignature(crypto.SHA256, ecdsaKeyPair.private)
 				require.NoError(t, err)
 				require.NotEmpty(t, sig)
 				require.Equal(t, len(sig), len(token.Signature))
-				// while the length should be equal, each run should not have equal values
 				require.NotEqual(t, sig, token.Signature)
 
-				err = token.VerifyECDSASignature(crypto.SHA256, testECDSAPublicKey)
-				require.NoError(t, err)
+				require.NoError(t, token.VerifyECDSASignature(crypto.SHA256, ecdsaKeyPair.public))
 
-				err = token.Verify(WithKey(testECDSAPublicKey))
-				require.NoError(t, err)
+				require.NoError(t, token.Verify(jwt.WithKey(ecdsaKeyPair.public)))
 			},
 		},
 		{
-			Name:  "JOSE header with claims and ECDSA SHA256 signature, but only RS256 is enabled",
-			Input: "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ",
-			Error: false,
-			Require: func(t *testing.T, token *Token) {
+			name:  "JOSE header with claims and ECDSA SHA256 signature, but only RS256 is enabled",
+			input: ecdsaToken.String(),
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.NoError(t, err)
 				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, Type, token.Header[header.Type])
+				require.Equal(t, jwt.Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
 
-				err := token.Verify(WithKey(testECDSAPublicKey), WithAllowedAlgorithms(jwa.RS256))
-				require.Error(t, err)
+				require.Error(t, token.Verify(jwt.WithKey(ecdsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.RS256)))
 			},
 		},
 		{
-			Name:  "JOSE header with claims and RSA SHA256 signature",
-			Input: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg",
-			Error: false,
-			Require: func(t *testing.T, token *Token) {
+			name:  "JOSE header with claims and RSA SHA256 signature",
+			input: rsaToken.String(),
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.NoError(t, err)
 				require.Equal(t, jwa.RS256, token.Header[header.Algorithm])
-				require.Equal(t, Type, token.Header[header.Type])
+				require.Equal(t, jwt.Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
 
-				sig, err := token.RSASignature(crypto.SHA256, testRSASHA256PrviateKey)
+				sig, err := token.RSASignature(crypto.SHA256, rsaKeyPair.private)
 				require.NoError(t, err)
 				require.NotEmpty(t, sig)
 				require.Equal(t, len(sig), len(token.Signature))
@@ -384,34 +229,38 @@ func TestParseStringAndVerify(t *testing.T) {
 
 				require.Equal(t, base64.Encode(sig), base64.Encode(token.Signature))
 
-				err = token.VerifyRSASignature(crypto.SHA256, testRSASHA256PublicKey)
-				require.NoError(t, err)
+				require.NoError(t, token.VerifyRSASignature(crypto.SHA256, rsaKeyPair.public))
 
-				err = token.Verify(WithKey(testRSASHA256PublicKey))
-				require.NoError(t, err)
+				require.NoError(t, token.Verify(jwt.WithKey(rsaKeyPair.public)))
 			},
 		},
 		{
-			Name:  "JOSE header only",
-			Input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9`,
-			Error: true, // too short
+			name:  "JOSE header only", // too short
+			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9`,
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.Error(t, err)
+				require.Nil(t, token)
+			},
 		},
 		{
-			Name:  "JOSE header with claims",
-			Input: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ`,
-			Error: true, // no signature
+			name:  "JOSE header with claims", // no signature
+			input: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ`,
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.Error(t, err)
+				require.Nil(t, token)
+			},
 		},
 		{
-			Name:  "JOSE header with claims and HMAC SHA256 signature",
-			Input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`,
-			Require: func(t *testing.T, token *Token) {
+			name:  "JOSE header with claims and HMAC SHA256 signature",
+			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`,
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.NoError(t, err)
 				require.Equal(t, jwa.HS256, token.Header[header.Algorithm])
-				require.Equal(t, Type, token.Header[header.Type])
-				require.Equal(t, int64(1300819380), token.Claims[ExpirationTime])
-				require.Equal(t, "joe", token.Claims[Issuer])
+				require.Equal(t, jwt.Type, token.Header[header.Type])
+				require.Equal(t, int64(1300819380), token.Claims[jwt.ExpirationTime])
+				require.Equal(t, "joe", token.Claims[jwt.Issuer])
 				require.Equal(t, true, token.Claims["http://example.com/is_root"])
 				require.NotEmpty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
 
 				sig, err := token.HMACSignature(crypto.SHA256, testHMACSecretKey)
 				require.NoError(t, err)
@@ -422,239 +271,240 @@ func TestParseStringAndVerify(t *testing.T) {
 				require.NoError(t, err)
 
 				// Token is expired
-				err = token.Verify(WithKey(testHMACSecretKey), WithAllowedAlgorithms(jwa.HS256))
+				err = token.Verify(jwt.WithKey(testHMACSecretKey), jwt.WithAllowedAlgorithms(jwa.HS256))
 				require.Error(t, err)
 			},
 		},
 		{
-			Name:  "JOSE header with claims and EdDSA signature",
-			Input: "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImthdGFyYXMifQ.U3ChCsJwStNnEdE_wgkh5elQHIKPYfdi4BZoy8CWQNAaFymND_-6fwghDC4bQRrcotXjD6WZDaSrJ_W7uVoBBQ",
-			Error: false,
-			Require: func(t *testing.T, token *Token) {
+			name:  "JOSE header with claims and EdDSA signature",
+			input: eddsaToken.String(),
+			check: func(t *testing.T, token *jwt.Token, err error) {
+				require.NoError(t, err)
 				require.Equal(t, jwa.EdDSA, token.Header[header.Algorithm])
-				require.Equal(t, Type, token.Header[header.Type])
+				require.Equal(t, jwt.Type, token.Header[header.Type])
 				require.NotEmpty(t, token.Claims)
 				require.NotEmpty(t, token.Signature)
-				require.Equal(t, token.raw, token.String())
 
-				sig, err := token.EdDSASignature(testEdDSAPrivateKey)
+				sig, err := token.EdDSASignature(eddsaKeyPair.private)
 				require.NoError(t, err)
 				require.NotEmpty(t, sig)
 				require.Equal(t, len(sig), len(token.Signature))
 				require.Equal(t, sig, token.Signature)
 
-				err = token.VerifyEdDSASignature(testEdDSAPublicKey)
+				err = token.VerifyEdDSASignature(eddsaKeyPair.public)
 				require.NoError(t, err)
 
-				err = token.Verify(WithKey(testEdDSAPublicKey), WithAllowedAlgorithms(jwa.EdDSA))
+				err = token.Verify(jwt.WithKey(eddsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.EdDSA))
 				require.NoError(t, err)
 			},
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			token, err := ParseString(test.Input)
-			if test.Error {
-				require.Error(t, err)
-				require.Nil(t, token)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, token)
-				test.Require(t, token)
-			}
+		t.Run(test.name, func(t *testing.T) {
+			token, err := jwt.ParseString(test.input)
+			test.check(t, token, err)
 		})
 	}
-
 }
 
 func TestSignJWT(t *testing.T) {
-	token := &Token{
+	keyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+
+	token := &jwt.Token{
 		Header: header.Parameters{
-			header.Type:      "JWT",
+			header.Type:      jwt.Type,
 			header.Algorithm: jwa.RS256,
 		},
-		Claims: ClaimsSet{
-			Subject: "test",
+		Claims: jwt.ClaimsSet{
+			jwt.Subject: "test",
 		},
 	}
 
-	sig, err := token.Sign(testRSASHA256PrviateKey)
+	sig, err := token.Sign(keyPair.private)
 	require.NoError(t, err)
 	require.NotNil(t, sig)
 	require.Equal(t, token.Signature, sig)
 }
 
 func TestNew(t *testing.T) {
+	var (
+		rsaKeyPair   = testNewKeyPair(t, keyutil.NewRSAKeyPair)
+		ecdsaKeyPair = testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+		eddsaKeyPair = testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+		hmacKey      = testHMACSecretKey
+	)
+
 	tests := []struct {
-		Name                    string
-		Error                   bool
-		Header                  header.Parameters
-		Claims                  ClaimsSet
-		SigningKey              interface{}
-		VerifyKey               interface{}
-		AllowedVerifyAlgorithms []jwa.Algorithm
+		name                    string
+		header                  header.Parameters
+		claims                  jwt.ClaimsSet
+		signingKey              any
+		verifyKey               any
+		allowedVerifyAlgorithms []jwa.Algorithm
 	}{
 		{
-			Name: "RSA SHA256",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA SHA256",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject: "test",
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
 			},
-			SigningKey:              testRSASHA256PrviateKey,
-			VerifyKey:               testRSASHA256PublicKey,
-			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
+			signingKey:              rsaKeyPair.private,
+			verifyKey:               rsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
 		},
 		{
-			Name: "RSA PSS SHA256",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA PSS SHA256",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.PS256,
 			},
-			Claims: ClaimsSet{
-				Subject: "test",
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
 			},
-			SigningKey:              testRSASHA256PrviateKey,
-			VerifyKey:               testRSASHA256PublicKey,
-			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
+			signingKey:              rsaKeyPair.private,
+			verifyKey:               rsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
 		},
 		{
-			Name: "ECDSA SHA256",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "ECDSA SHA256",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.ES256,
 			},
-			Claims: ClaimsSet{
-				Subject: "test",
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
 			},
-			SigningKey:              testECDSAPrivateKey,
-			VerifyKey:               testECDSAPublicKey,
-			AllowedVerifyAlgorithms: DefaultAllowedAlogrithms(),
+			signingKey:              ecdsaKeyPair.private,
+			verifyKey:               ecdsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
 		},
 		{
-			Name: "HMAC SHA256",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "EdDSA",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
+				header.Algorithm: jwa.EdDSA,
+			},
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
+			},
+			signingKey:              eddsaKeyPair.private,
+			verifyKey:               eddsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+		},
+		{
+			name: "HMAC SHA256",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.HS256,
 			},
-			Claims: ClaimsSet{
-				Subject: "test",
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
 			},
-			SigningKey:              testHMACSecretKey,
-			VerifyKey:               testHMACSecretKey,
-			AllowedVerifyAlgorithms: []jwa.Algorithm{jwa.HS256},
+			signingKey:              hmacKey,
+			verifyKey:               hmacKey,
+			allowedVerifyAlgorithms: []jwa.Algorithm{jwa.HS256},
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
+		t.Run(test.name, func(t *testing.T) {
+			token := testToken(t, test.header, test.claims, test.signingKey)
 
-			if test.Error {
-				require.Error(t, err)
-				require.Nil(t, token)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, token)
-
-				verifyOpts := []VerifyOption{
-					WithAllowedAlgorithms(test.AllowedVerifyAlgorithms...),
-				}
-
-				if test.VerifyKey != nil {
-					switch verifyKey := test.VerifyKey.(type) {
-					case *rsa.PublicKey:
-						verifyOpts = append(verifyOpts, WithKey(verifyKey))
-					case *ecdsa.PublicKey:
-						verifyOpts = append(verifyOpts, WithKey(verifyKey))
-					case ed25519.PublicKey:
-						verifyOpts = append(verifyOpts, WithKey(verifyKey))
-					case []byte:
-						verifyOpts = append(verifyOpts, WithKey(verifyKey))
-					case string:
-						verifyOpts = append(verifyOpts, WithKey(verifyKey))
-					default:
-						t.Fatalf("unsupported verify key type: %T", verifyKey)
-					}
-				}
-
-				err = token.Verify(verifyOpts...)
-				require.NoError(t, err)
+			verifyOpts := []jwt.VerifyOption{
+				jwt.WithAllowedAlgorithms(test.allowedVerifyAlgorithms...),
 			}
+
+			if test.verifyKey != nil {
+				switch verifyKey := test.verifyKey.(type) {
+				case *rsa.PublicKey:
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
+				case *ecdsa.PublicKey:
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
+				case ed25519.PublicKey:
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
+				case []byte:
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
+				default:
+					t.Fatalf("potentially unsupported verify key type: %T", verifyKey)
+				}
+			}
+
+			err := token.Verify(verifyOpts...)
+			require.NoError(t, err)
 		})
 	}
 
 }
 
 func TestNewExpired(t *testing.T) {
+	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+
 	tests := []struct {
-		Name       string
-		Header     header.Parameters
-		Claims     ClaimsSet
-		SigningKey interface{}
-		Error      bool
-		Expired    bool
-		Expires    bool
+		name       string
+		header     header.Parameters
+		claims     jwt.ClaimsSet
+		signingKey any
+		expired    bool
+		expires    bool
 	}{
 		{
-			Name: "expired",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "expired",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:        "test",
-				IssuedAt:       time.Now().Unix(),
-				ExpirationTime: time.Now().Add(-time.Hour).Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:        "test",
+				jwt.IssuedAt:       time.Now().Unix(),
+				jwt.ExpirationTime: time.Now().Add(-time.Hour).Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			Expired:    true,
-			Expires:    true,
+			signingKey: rsaKeyPair.private,
+			expired:    true,
+			expires:    true,
 		},
 		{
-			Name: "not expired",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "not expired",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:        "test",
-				IssuedAt:       time.Now().Unix(),
-				ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:        "test",
+				jwt.IssuedAt:       time.Now().Unix(),
+				jwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			Expired:    false,
-			Expires:    true,
+			signingKey: rsaKeyPair.private,
+			expired:    false,
+			expires:    true,
 		},
 		{
-			Name: "not expires",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "not expires",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:  "test",
-				IssuedAt: time.Now().Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:  "test",
+				jwt.IssuedAt: time.Now().Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			Expired:    false,
-			Expires:    false,
+			signingKey: rsaKeyPair.private,
+			expired:    false,
+			expires:    false,
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
-			require.NoError(t, err)
-			require.NotNil(t, token)
+		t.Run(test.name, func(t *testing.T) {
+			token := testToken(t, test.header, test.claims, test.signingKey)
 
 			expires, err := token.Expires()
 			require.NoError(t, err)
 
-			if test.Expires {
+			if test.expires {
 				require.True(t, expires)
 			} else {
 				require.False(t, expires)
@@ -663,7 +513,7 @@ func TestNewExpired(t *testing.T) {
 			expired, err := token.Expired(time.Now)
 			require.NoError(t, err)
 
-			if test.Expired {
+			if test.expired {
 				require.True(t, expired)
 			} else {
 				require.False(t, expired)
@@ -673,103 +523,112 @@ func TestNewExpired(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
+	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+
+	checkSuccess := func(t *testing.T, token *jwt.Token, err error) {
+		require.NoError(t, err)
+		require.NotNil(t, token)
+	}
+
+	checkFailure := func(t *testing.T, token *jwt.Token, err error) {
+		require.Error(t, err)
+		require.NotNil(t, token)
+	}
+
 	tests := []struct {
-		Name       string
-		Header     header.Parameters
-		Claims     ClaimsSet
-		SigningKey interface{}
-		VerifyKey  interface{}
-		Error      bool
+		name       string
+		header     header.Parameters
+		claims     jwt.ClaimsSet
+		signingKey any
+		verifyKey  any
+		check      func(t *testing.T, token *jwt.Token, err error)
 	}{
 		{
-			Name: "RSA SHA256",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA SHA256",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:        "test",
-				IssuedAt:       time.Now().Unix(),
-				ExpirationTime: time.Now().Add(time.Hour).Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:        "test",
+				jwt.IssuedAt:       time.Now().Unix(),
+				jwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			VerifyKey:  testRSASHA256PublicKey,
+			signingKey: rsaKeyPair.private,
+			verifyKey:  rsaKeyPair.public,
+			check:      checkSuccess,
 		},
 		{
-			Name: "RSA SHA256 no expiration",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA SHA256 no expiration",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject: "test",
+			claims: jwt.ClaimsSet{
+				jwt.Subject: "test",
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			VerifyKey:  testRSASHA256PublicKey,
+			signingKey: rsaKeyPair.private,
+			verifyKey:  rsaKeyPair.public,
+			check:      checkSuccess,
 		},
 		{
-			Name: "RSA SHA256 expired",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA SHA256 expired",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:        "test",
-				IssuedAt:       time.Now().Unix(),
-				ExpirationTime: time.Now().Add(-time.Hour).Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:        "test",
+				jwt.IssuedAt:       time.Now().Unix(),
+				jwt.ExpirationTime: time.Now().Add(-time.Hour).Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			VerifyKey:  testRSASHA256PublicKey,
-			Error:      true,
+			signingKey: rsaKeyPair.private,
+			verifyKey:  rsaKeyPair.public,
+			check:      checkFailure,
 		},
 		{
-			Name: "RSA SHA256 unable to use yet",
-			Header: header.Parameters{
-				header.Type:      "JWT",
+			name: "RSA SHA256 unable to use yet",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
 				header.Algorithm: jwa.RS256,
 			},
-			Claims: ClaimsSet{
-				Subject:   "test",
-				IssuedAt:  time.Now().Unix(),
-				NotBefore: time.Now().Add(30 * time.Second).Unix(),
+			claims: jwt.ClaimsSet{
+				jwt.Subject:   "test",
+				jwt.IssuedAt:  time.Now().Unix(),
+				jwt.NotBefore: time.Now().Add(30 * time.Second).Unix(),
 			},
-			SigningKey: testRSASHA256PrviateKey,
-			VerifyKey:  testRSASHA256PublicKey,
-			Error:      true,
+			signingKey: rsaKeyPair.private,
+			verifyKey:  rsaKeyPair.public,
+			check:      checkFailure,
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.Name, func(t *testing.T) {
-			token, err := newToken(t, test.Header, test.Claims, test.SigningKey)
-			require.NoError(t, err)
-			require.NotNil(t, token)
+		t.Run(test.name, func(t *testing.T) {
+			token := testToken(t, test.header, test.claims, test.signingKey)
 
-			verifyOpts := []VerifyOption{}
+			verifyOpts := []jwt.VerifyOption{}
 
-			if test.VerifyKey != nil {
-				switch verifyKey := test.VerifyKey.(type) {
+			if test.verifyKey != nil {
+				switch verifyKey := test.verifyKey.(type) {
 				case *rsa.PublicKey:
-					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
 				case *ecdsa.PublicKey:
-					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
 				case ed25519.PublicKey:
-					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
 				case []byte:
-					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
 				case string:
-					verifyOpts = append(verifyOpts, WithKey(verifyKey))
+					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
 				default:
 					t.Fatalf("unsupported verify key type: %T", verifyKey)
 				}
 			}
 
-			err = token.Verify(verifyOpts...)
-			if test.Error {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-			}
+			err := token.Verify(verifyOpts...)
+
+			test.check(t, token, err)
 		})
 	}
 }
@@ -786,14 +645,14 @@ func FuzzParseString(f *testing.F) {
 	f.Add("eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg")
 
 	f.Fuzz(func(t *testing.T, data string) {
-		_, err := ParseString(data)
+		_, err := jwt.ParseString(data)
 		if err != nil {
 			t.Skip()
 		}
 	})
 }
 
-var parseStringResult *Token
+var parseStringResult *jwt.Token
 
 func BenchmarkParseString(b *testing.B) {
 	s := "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ"
@@ -803,30 +662,7 @@ func BenchmarkParseString(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		parseStringResult, err = ParseString(s)
+		parseStringResult, err = jwt.ParseString(s)
 		require.NoError(b, err)
 	}
-}
-
-var computeStringResult string
-
-func Benchmark_computeString(b *testing.B) {
-	t := &Token{
-		Header: header.Parameters{
-			header.Type:      "JWT",
-			header.Algorithm: jwa.RS256,
-		},
-		Claims: ClaimsSet{
-			Subject: "test",
-		},
-		Signature: []byte("feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ"),
-	}
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		computeStringResult = t.computeString()
-	}
-
-	b.StopTimer()
 }
