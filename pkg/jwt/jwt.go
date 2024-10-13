@@ -147,35 +147,35 @@ func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Toke
 }
 
 const dot = "."
-const invalidHeader = "<invalid-header>."
 
 // computeString computes the string representation of the token,
 // which is used for signing and verifying the token.
-func (t *Token) computeString() string {
-	s := strings.Builder{}
+func (t *Token) computeString() (string, error) {
+	b := strings.Builder{}
 
 	header, err := t.Header.Base64URLString()
 	if err != nil {
-		s.WriteString(invalidHeader)
-	} else {
-		s.WriteString(header)
-		s.WriteString(dot)
+		return "", fmt.Errorf("failed to compute header base64 string: %w", err)
 	}
+	b.WriteString(header)
+	b.WriteString(dot)
 
-	if len(t.Claims) > 0 {
-		s.WriteString(t.Claims.String())
+	claims, err := t.Claims.Base64URLString()
+	if err != nil {
+		return "", fmt.Errorf("failed to compute claims base64 string: %w", err)
 	}
+	b.WriteString(claims)
 
 	if len(t.Signature) != 0 {
-		s.WriteString(dot)
-		s.WriteString(base64.Encode(t.Signature))
+		b.WriteString(dot)
+		b.WriteString(base64.Encode(t.Signature))
 	}
 
 	if len(t.raw) == 0 {
-		t.raw = s.String()
+		t.raw = b.String()
 	}
 
-	return s.String()
+	return b.String(), nil
 }
 
 // String returns the string representation of the token, which is
@@ -183,12 +183,17 @@ func (t *Token) computeString() string {
 // by a period.
 func (t *Token) String() string {
 	// Return the raw string if it is set.
-	if len(t.raw) != 0 {
+	if len(t.raw) > 0 {
 		return t.raw
 	}
 
 	// If there raw string is not set, compute it.
-	return t.computeString()
+	s, err := t.computeString()
+	if err != nil {
+		return fmt.Sprintf("<invalid-token %q>", err)
+	}
+
+	return s
 }
 
 // PrivateKey is a type that can be used to sign a JWT,
@@ -308,16 +313,35 @@ func ParseString(input string) (*Token, error) {
 		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
 	}
 
-	for claimName, claimValue := range claims {
-		// parsing JSON values into an interface can be tricky
-		switch claimName {
-		case IssuedAt, ExpirationTime, NotBefore:
-			switch v := claimValue.(type) {
+	// Ensure we're using the correct types for registered claims.
+	{
+		if issuedAt, ok := claims[IssuedAt]; ok {
+			switch v := issuedAt.(type) {
 			case int64: // good
 			case float64: // ok
-				claims[claimName] = int64(v)
+				claims[IssuedAt] = int64(v)
 			default: // bad
-				return nil, fmt.Errorf("invalid type %T used for %q", v, claimName)
+				return nil, fmt.Errorf("invalid type %T used for %q", v, IssuedAt)
+			}
+		}
+
+		if expirationTime, ok := claims[ExpirationTime]; ok {
+			switch v := expirationTime.(type) {
+			case int64: // good
+			case float64: // ok
+				claims[ExpirationTime] = int64(v)
+			default: // bad
+				return nil, fmt.Errorf("invalid type %T used for %q", v, ExpirationTime)
+			}
+		}
+
+		if notBefore, ok := claims[NotBefore]; ok {
+			switch v := notBefore.(type) {
+			case int64: // good
+			case float64: // ok
+				claims[NotBefore] = int64(v)
+			default: // bad
+				return nil, fmt.Errorf("invalid type %T used for %q", v, NotBefore)
 			}
 		}
 	}
@@ -340,18 +364,6 @@ func ParseString(input string) (*Token, error) {
 	}
 
 	return token, nil
-}
-
-// Set is a set of comparable values for JWT operations.
-type Set[T comparable] map[T]struct{}
-
-// NewSet creates a new set of strings.
-func NewSet(strings ...string) Set[string] {
-	m := make(Set[string])
-	for _, s := range strings {
-		m[s] = struct{}{}
-	}
-	return m
 }
 
 // Issuers is a set of issuers.
@@ -577,15 +589,14 @@ func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys map[string]any
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
-	// get the key based on "kid" header parameter
-	keyID, err := GetCalimValue[string](t.Claims, header.KeyID)
-	if err != nil {
-		// if no "kid" header parameter, then get the first key
-		// in the allowed keys map
-		for allowedKeyID := range allowedKeys {
-			keyID = allowedKeyID
-			break
+	// There might be a key identifier we want to use.
+	var keyID string
+	if t.Header.Has(header.KeyID) {
+		kid, err := t.Header.Get(header.KeyID)
+		if err != nil {
+			return fmt.Errorf("failed to get key ID: %w", err)
 		}
+		keyID = fmt.Sprintf("%v", kid)
 	}
 
 	// Verify the signature based on the algorithm.
@@ -737,19 +748,20 @@ func (t *Token) HMACSignature(hash crypto.Hash, key any) ([]byte, error) {
 
 	var data string
 
-	if parts := strings.Split(t.raw, "."); len(parts) >= 2 {
-		data = strings.Join(parts[0:2], ".")
+	if parts := strings.Split(t.raw, dot); len(parts) >= 2 {
+		data = strings.Join(parts[0:2], dot)
 	} else {
-		if len(t.Header) > 0 {
-			str, err := t.Header.Base64URLString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate JOSE header base64 string: %w", err)
-			}
-			data = str
+		str, err := t.Header.Base64URLString()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate JOSE header base64 string: %w", err)
 		}
-		if len(t.Claims) > 0 {
-			data += ("." + t.Claims.String())
+		data = str
+
+		claims, err := t.Claims.Base64URLString()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate claims base64 string: %w", err)
 		}
+		data += (dot + claims)
 	}
 
 	h := hmac.New(hash.New, secretKey)
@@ -794,7 +806,7 @@ func (t *Token) VerifyRSASignature(hash crypto.Hash, publicKey *rsa.PublicKey) e
 		return fmt.Errorf("failed to split token: %w", err)
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	h := hash.New()
 	h.Write([]byte(data))
@@ -822,12 +834,12 @@ func (t *Token) RSASignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]by
 		t.raw = t.String()
 	}
 
-	parts := strings.Split(t.raw, ".")
+	parts := strings.Split(t.raw, dot)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	h := hash.New()
 	h.Write([]byte(data))
@@ -853,12 +865,12 @@ func (t *Token) RSAPSSSignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([
 		t.raw = t.String()
 	}
 
-	parts := strings.Split(t.raw, ".")
+	parts := strings.Split(t.raw, dot)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 	h := hash.New()
 	h.Write([]byte(data))
 
@@ -884,7 +896,7 @@ func (t *Token) VerifyRSAPSSSignature(hash crypto.Hash, publicKey *rsa.PublicKey
 		return fmt.Errorf("failed to split token: %w", err)
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 	h := hash.New()
 	h.Write([]byte(data))
 
@@ -909,7 +921,7 @@ func (t *Token) VerifyECDSASignature(hash crypto.Hash, publicKey *ecdsa.PublicKe
 
 	sig := t.Signature
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	var keySize int
 
@@ -955,12 +967,12 @@ func (t *Token) ECDSASignature(hash crypto.Hash, privateKey *ecdsa.PrivateKey) (
 		t.raw = t.String()
 	}
 
-	parts := strings.Split(t.raw, ".")
+	parts := strings.Split(t.raw, dot)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	h := hash.New()
 	h.Write([]byte(data))
@@ -1025,7 +1037,7 @@ func (t *Token) VerifyEdDSASignature(publicKey ed25519.PublicKey) error {
 
 	sig := t.Signature
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	verified := ed25519.Verify(publicKey, []byte(data), sig)
 	if !verified {
@@ -1050,12 +1062,12 @@ func (t *Token) EdDSASignature(privateKey ed25519.PrivateKey) ([]byte, error) {
 		t.raw = t.String()
 	}
 
-	parts := strings.Split(t.raw, ".")
+	parts := strings.Split(t.raw, dot)
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
 	}
 
-	data := strings.Join(parts[0:2], ".")
+	data := strings.Join(parts[0:2], dot)
 
 	return ed25519.Sign(privateKey, []byte(data)), nil
 }
@@ -1201,7 +1213,10 @@ func (t *Token) Sign(key any) ([]byte, error) {
 		return nil, fmt.Errorf("algorithm %q not implemented", alg)
 	}
 
-	t.raw = t.computeString()
+	t.raw, err = t.computeString()
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute token string: %w", err)
+	}
 
 	return t.Signature, nil
 }
@@ -1271,7 +1286,7 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		}
 	}
 
-	expired, err := t.Expired(time.Now)
+	expired, err := t.Expired(config.Clock)
 	if err != nil {
 		return fmt.Errorf("failed to validate token expiration: %w", err)
 	}
@@ -1283,7 +1298,7 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	if notBeforeValue, ok := t.Claims[NotBefore]; ok {
 		if notBeforeInt, ok := notBeforeValue.(int64); ok {
 			notBefore := time.Unix(notBeforeInt, 0)
-			if time.Now().Before(notBefore) {
+			if config.Clock().Before(notBefore) {
 				return fmt.Errorf("token is unable to be used before %v", notBefore)
 			}
 		} else {
@@ -1297,12 +1312,18 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 // splitToken splits a JWT into its three parts, returning an error if the
 // token is not in the correct format.
 func splitToken(token string) ([3]string, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return [3]string{}, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
+	var parts [3]string
+	var i, j int
+	for k := 0; k < 2; k++ {
+		j = strings.IndexByte(token[i:], '.') + i
+		if j < i {
+			return [3]string{}, fmt.Errorf("jwt: incorrect number of JWT parts")
+		}
+		parts[k] = token[i:j]
+		i = j + 1
 	}
-
-	return [3]string{parts[0], parts[1], parts[2]}, nil
+	parts[2] = token[i:]
+	return parts, nil
 }
 
 // FromHTTPAuthorizationHeader extracts a JWT string from the Authorization header of an HTTP request.

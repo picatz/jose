@@ -232,3 +232,9 @@ func (h Parameters) Get(param ParamaterName) (any, error) {
 	}
 	return value, nil
 }
+
+// Has returns true if the given paramater name exists in the set of JOSE header paramaters.
+func (h Parameters) Has(param ParamaterName) bool {
+	_, ok := h[param]
+	return ok
+}

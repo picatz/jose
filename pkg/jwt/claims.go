@@ -45,17 +45,17 @@ const (
 // as a name/value pair consisting of a Claim Name and a Claim Value.
 type ClaimsSet map[ClaimName]ClaimValue
 
-// String returns the string representation of the ClaimsSet as a base64 encoded JSON object.
-// If the ClaimsSet cannot be encoded, it returns a string representation of the error.
-func (claims ClaimsSet) String() string {
+// Base64URLString encodes the ClaimsSet as a JSON object and then encodes
+// the JSON object as a Base64 URL-encoded string.
+func (claims ClaimsSet) Base64URLString() (string, error) {
 	buff := bytes.NewBuffer(nil)
 
 	err := json.NewEncoder(buff).Encode(claims)
 	if err != nil {
-		return fmt.Sprintf("<invalid-claims-set %q: %#v>", err, claims)
+		return "", fmt.Errorf("jwt: claims set encoding error: %w", err)
 	}
 
-	return base64.Encode(buff.Bytes())
+	return base64.Encode(buff.Bytes()), nil
 }
 
 // Get returns the ClaimValue for the given ClaimName.
