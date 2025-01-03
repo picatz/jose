@@ -531,6 +531,7 @@ func NewURLSetCache(client *http.Client, refreshInterval, cacheDuration time.Dur
 	return &URLSetCache{
 		mutex:           sync.RWMutex{},
 		sets:            make(map[string]*Set),
+		cacheTimes:      make(map[string]time.Time),
 		client:          client,
 		refreshInterval: refreshInterval,
 		cacheDuration:   cacheDuration,
@@ -540,18 +541,14 @@ func NewURLSetCache(client *http.Client, refreshInterval, cacheDuration time.Dur
 // Get returns the JWK set for the given URL, fetching it if it is not already cached.
 func (c *URLSetCache) Get(ctx context.Context, url string) (*Set, error) {
 	c.mutex.RLock()
-	set, ok := c.sets[url]
-	urlCacheTime := c.cacheTimes[url]
+	set, cached := c.sets[url]
+	expiry := c.cacheTimes[url]
 	c.mutex.RUnlock()
 
-	if !ok {
+	// If there's no set or the set is expired, fetch a fresh copy.
+	if !cached || time.Now().After(expiry) {
 		return c.Fetch(ctx, url)
 	}
-
-	if time.Now().After(urlCacheTime) {
-		return c.Refresh(ctx, url)
-	}
-
 	return set, nil
 }
 
@@ -628,13 +625,17 @@ func (c *URLSetCache) Refresh(ctx context.Context, url string) (*Set, error) {
 
 // RefreshAll refreshes all JWK sets in the cache.
 func (c *URLSetCache) RefreshAll(ctx context.Context) error {
+	c.mutex.RLock()
+	urls := make([]string, 0, len(c.sets))
 	for url := range c.sets {
-		set, err := FetchSet(ctx, url, c.client)
-		if err != nil {
+		urls = append(urls, url)
+	}
+	c.mutex.RUnlock()
+
+	for _, url := range urls {
+		if _, err := c.Refresh(ctx, url); err != nil {
 			return fmt.Errorf("failed to refresh JWK set for %q: %w", url, err)
 		}
-
-		c.sets[url] = set
 	}
 	return nil
 }
