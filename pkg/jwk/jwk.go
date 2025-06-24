@@ -614,6 +614,7 @@ func (c *URLSetCache) Fetch(ctx context.Context, url string) (*Set, error) {
 	}
 
 	c.sets[url] = set
+	c.cacheTimes[url] = time.Now().Add(c.cacheDuration)
 
 	return set, nil
 }
