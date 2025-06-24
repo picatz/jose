@@ -1234,16 +1234,33 @@ func (t *Token) Sign(key any) ([]byte, error) {
 	return t.Signature, nil
 }
 
-var defaultAllowedAlogrithms = []jwa.Algorithm{
+var defaultAllowedAlgorithms = []jwa.Algorithm{
 	jwa.RS256, jwa.RS384, jwa.RS512,
 	jwa.PS256, jwa.PS384, jwa.PS512,
 	jwa.ES256, jwa.ES384, jwa.ES512,
-	jwa.HS256, jwa.HS384, jwa.HS512,
 	jwa.EdDSA,
+	// These are allowed by default, but should be used with caution.
+	// They are not recommended for production use, as they are
+	// considered insecure and can lead to vulnerabilities in many cases.
+	jwa.HS256, jwa.HS384, jwa.HS512,
 }
 
-func DefaultAllowedAlogrithms() []jwa.Algorithm {
-	return defaultAllowedAlogrithms
+// DefaultAllowedAlgorithms returns the default set of allowed algorithms
+// for verifying JWTs. This set is used by the Verify method if no
+// other algorithms are specified. It includes the most common
+// algorithms used in JWTs, such as RS256, PS256, ES256, and
+// EdDSA, as well as HMAC algorithms (HS256, HS384, HS512).
+//
+// # Warning
+//
+// This set of algorithms are generally considered secure, but the HMAC algorithms
+// (HS256, HS384, HS512) should be used with caution, as they require a shared secret
+// between the issuer and the verifier, which can lead to vulnerabilities
+// if not managed properly. It is recommended to use asymmetric algorithms
+// (RS256, PS256, ES256, EdDSA) for production use, as they provide better security
+// by using public/private key pairs.
+func DefaultAllowedAlgorithms() []jwa.Algorithm {
+	return defaultAllowedAlgorithms
 }
 
 // Verify is used to verify a signed Token object with the given config options.

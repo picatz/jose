@@ -355,7 +355,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 		},
 		{
 			name: "RSA SHA256 with audience as string",
@@ -369,7 +369,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 			allowedAudiences:        []string{"test"},
 		},
 		{
@@ -384,7 +384,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 			allowedAudiences:        []string{"test"},
 		},
 		{
@@ -398,7 +398,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 		},
 		{
 			name: "ECDSA SHA256",
@@ -411,7 +411,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              ecdsaKeyPair.private,
 			verifyKey:               ecdsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 		},
 		{
 			name: "EdDSA",
@@ -424,7 +424,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              eddsaKeyPair.private,
 			verifyKey:               eddsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
 		},
 		{
 			name: "HMAC SHA256",
