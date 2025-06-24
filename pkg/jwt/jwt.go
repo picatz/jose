@@ -754,6 +754,12 @@ func (t *Token) HMACSignature(hash crypto.Hash, key any) ([]byte, error) {
 		return nil, fmt.Errorf("no secret key provided, cannot complete operation")
 	}
 
+	// Validate minimum key length for security
+	minKeyLength := hash.Size()
+	if len(secretKey) < minKeyLength {
+		return nil, fmt.Errorf("HMAC key must be at least %d bytes for %s algorithm, got %d bytes", minKeyLength, hash.String(), len(secretKey))
+	}
+
 	// Ensure the hash is available.
 	if !hash.Available() {
 		return nil, fmt.Errorf("requested hash is not available")
