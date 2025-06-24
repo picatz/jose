@@ -418,7 +418,11 @@ type VerifyConfig struct {
 	// If not set, then time.Now will be used.
 	Clock func() time.Time
 
-	// TODO(kent): add more verify options
+	// ClockSkewTolerance is the maximum amount of clock skew to allow
+	// when validating time-based claims (exp, nbf, iat).
+	//
+	// If not set, defaults to 0 (no tolerance).
+	ClockSkewTolerance time.Duration
 }
 
 // VerifyOption is a functional option type used to configure
@@ -521,6 +525,15 @@ func WithClock(clock Clock) VerifyOption {
 func WithDefaultClock() VerifyOption {
 	return func(vc *VerifyConfig) error {
 		vc.Clock = time.Now
+		return nil
+	}
+}
+
+// WithClockSkewTolerance sets the clock skew tolerance for time-based claims.
+// This allows for small differences in system clocks between the issuer and verifier.
+func WithClockSkewTolerance(tolerance time.Duration) VerifyOption {
+	return func(vc *VerifyConfig) error {
+		vc.ClockSkewTolerance = tolerance
 		return nil
 	}
 }
@@ -1341,13 +1354,30 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	}
 
 	if expired {
-		return fmt.Errorf("token is expired")
+		// Apply clock skew tolerance for expiration
+		if config.ClockSkewTolerance > 0 {
+			if expValue, ok := t.Claims[ExpirationTime]; ok {
+				if expInt, ok := expValue.(int64); ok {
+					exp := time.Unix(expInt, 0)
+					if config.Clock().After(exp.Add(config.ClockSkewTolerance)) {
+						return fmt.Errorf("token is expired")
+					}
+				}
+			}
+		} else {
+			return fmt.Errorf("token is expired")
+		}
 	}
 
 	if notBeforeValue, ok := t.Claims[NotBefore]; ok {
 		if notBeforeInt, ok := notBeforeValue.(int64); ok {
 			notBefore := time.Unix(notBeforeInt, 0)
-			if config.Clock().Before(notBefore) {
+			// Apply clock skew tolerance for "not before"
+			adjustedNotBefore := notBefore
+			if config.ClockSkewTolerance > 0 {
+				adjustedNotBefore = notBefore.Add(-config.ClockSkewTolerance)
+			}
+			if config.Clock().Before(adjustedNotBefore) {
 				return fmt.Errorf("token is unable to be used before %v", notBefore)
 			}
 		} else {
