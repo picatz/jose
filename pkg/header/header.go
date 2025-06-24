@@ -96,7 +96,7 @@ const (
 	// of the DER encoding of the X.509 certificate corresponding to the key used to digitally sign the JWS or encrypt the JWE.
 	//
 	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.8
-	X509CertificateSHA256Thumbprint Registered = "x5tX#S256"
+	X509CertificateSHA256Thumbprint Registered = "x5t#S256"
 
 	// Type "typ" is the [media type] of this complete JOSE object (JWS or JWE).
 	//
