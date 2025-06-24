@@ -552,7 +552,7 @@ func (c *URLSetCache) Get(ctx context.Context, url string) (*Set, error) {
 	return set, nil
 }
 
-// Get returns the first key from the JWK set for the given URL that matches the given key id,
+// GetKey returns the first key from the JWK set for the given URL that matches the given key id,
 // fetching the JWK set if it is not already cached.
 func (c *URLSetCache) GetKey(ctx context.Context, url string, keyID string) (Value, error) {
 	c.mutex.RLock()
