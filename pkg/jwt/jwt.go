@@ -640,120 +640,15 @@ func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[str
 	// Verify the signature based on the algorithm.
 	switch alg {
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		if keyID != "" {
-			if key, ok := allowedKeys[keyID]; ok {
-				return t.VerifyHMACSignature(algHash[alg], key)
-			}
-			return fmt.Errorf("failed to verify HMAC signature using key %q", keyID)
-		}
-
-		for _, key := range allowedKeys {
-			err := t.VerifyHMACSignature(algHash[alg], key)
-			if err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
+		return t.verifyHMACSignatureWithKeys(algHash[alg], keyID, allowedKeys)
 	case jwa.RS256, jwa.RS384, jwa.RS512:
-		if keyID != "" {
-			if key, ok := allowedKeys[keyID]; ok {
-				publicKey, ok := key.(*rsa.PublicKey)
-				if !ok {
-					return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
-				}
-
-				return t.VerifyRSASignature(algHash[alg], publicKey)
-			}
-
-			return fmt.Errorf("failed to verify RSA signature using key %q", keyID)
-		}
-
-		for _, key := range allowedKeys {
-			publicKey, ok := key.(*rsa.PublicKey)
-			if !ok {
-				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
-			}
-			err := t.VerifyRSASignature(algHash[alg], publicKey)
-			if err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
+		return t.verifyRSASignatureWithKeys(algHash[alg], keyID, allowedKeys)
 	case jwa.PS256, jwa.PS384, jwa.PS512:
-		if keyID != "" {
-			if key, ok := allowedKeys[keyID]; ok {
-				publicKey, ok := key.(*rsa.PublicKey)
-				if !ok {
-					return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
-				}
-
-				return t.VerifyRSAPSSSignature(algHash[alg], publicKey)
-			}
-
-			return fmt.Errorf("failed to verify RSA signature using key %q", keyID)
-		}
-
-		for _, key := range allowedKeys {
-			publicKey, ok := key.(*rsa.PublicKey)
-			if !ok {
-				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
-			}
-			err := t.VerifyRSAPSSSignature(algHash[alg], publicKey)
-			if err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
+		return t.verifyRSAPSSSignatureWithKeys(algHash[alg], keyID, allowedKeys)
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		if keyID != "" {
-			if key, ok := allowedKeys[keyID]; ok {
-				publicKey, ok := key.(*ecdsa.PublicKey)
-				if !ok {
-					return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
-				}
-
-				return t.VerifyECDSASignature(algHash[alg], publicKey)
-			}
-
-			return fmt.Errorf("failed to verify ECDSA signature using key %q", keyID)
-		}
-
-		for _, key := range allowedKeys {
-			publicKey, ok := key.(*ecdsa.PublicKey)
-			if !ok {
-				return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
-			}
-			err := t.VerifyECDSASignature(algHash[alg], publicKey)
-			if err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
+		return t.verifyECDSASignatureWithKeys(algHash[alg], keyID, allowedKeys)
 	case jwa.EdDSA:
-		if keyID != "" {
-			if key, ok := allowedKeys[keyID]; ok {
-				publicKey, ok := key.(ed25519.PublicKey)
-				if !ok {
-					return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
-				}
-
-				return t.VerifyEdDSASignature(publicKey)
-			}
-
-			return fmt.Errorf("failed to verify EdDSA signature using key %q", keyID)
-		}
-
-		for _, key := range allowedKeys {
-			publicKey, ok := key.(ed25519.PublicKey)
-			if !ok {
-				return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
-			}
-			err := t.VerifyEdDSASignature(publicKey)
-			if err == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
+		return t.verifyEdDSASignatureWithKeys(keyID, allowedKeys)
 	default:
 		return fmt.Errorf("algorithm %q not implemented or allowed", alg)
 	}
@@ -1480,4 +1375,142 @@ func FromContext(ctx context.Context) *Token {
 // WithContext sets the JWT in the given context.
 func WithContext(ctx context.Context, token *Token) context.Context {
 	return context.WithValue(ctx, ContextKey, token)
+}
+
+// verifyHMACSignatureWithKeys verifies HMAC signature using the provided keys.
+// This method prevents timing attacks by testing all keys when no specific keyID is provided.
+func (t *Token) verifyHMACSignatureWithKeys(hash crypto.Hash, keyID string, allowedKeys map[string]any) error {
+	if keyID != "" {
+		if key, ok := allowedKeys[keyID]; ok {
+			return t.VerifyHMACSignature(hash, key)
+		}
+		return fmt.Errorf("failed to verify HMAC signature using key %q", keyID)
+	}
+
+	// When no specific key ID, try all keys but don't leak timing information
+	var lastErr error
+	validKeyFound := false
+
+	for _, key := range allowedKeys {
+		err := t.VerifyHMACSignature(hash, key)
+		if err == nil {
+			validKeyFound = true
+			// Continue testing all keys to prevent timing attacks
+		} else {
+			lastErr = err
+		}
+	}
+
+	if validKeyFound {
+		return nil
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys: %w", lastErr)
+	}
+	return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
+}
+
+// verifyRSASignatureWithKeys verifies RSA signature using the provided keys.
+func (t *Token) verifyRSASignatureWithKeys(hash crypto.Hash, keyID string, allowedKeys map[string]any) error {
+	if keyID != "" {
+		if key, ok := allowedKeys[keyID]; ok {
+			publicKey, ok := key.(*rsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify RSA signature: public key type %T is invalid", key)
+			}
+			return t.VerifyRSASignature(hash, publicKey)
+		}
+		return fmt.Errorf("failed to verify RSA signature using key %q", keyID)
+	}
+
+	for _, key := range allowedKeys {
+		publicKey, ok := key.(*rsa.PublicKey)
+		if !ok {
+			continue // Skip non-RSA keys
+		}
+		err := t.VerifyRSASignature(hash, publicKey)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
+}
+
+// verifyRSAPSSSignatureWithKeys verifies RSA-PSS signature using the provided keys.
+func (t *Token) verifyRSAPSSSignatureWithKeys(hash crypto.Hash, keyID string, allowedKeys map[string]any) error {
+	if keyID != "" {
+		if key, ok := allowedKeys[keyID]; ok {
+			publicKey, ok := key.(*rsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify RSA-PSS signature: public key type %T is invalid", key)
+			}
+			return t.VerifyRSAPSSSignature(hash, publicKey)
+		}
+		return fmt.Errorf("failed to verify RSA-PSS signature using key %q", keyID)
+	}
+
+	for _, key := range allowedKeys {
+		publicKey, ok := key.(*rsa.PublicKey)
+		if !ok {
+			continue // Skip non-RSA keys
+		}
+		err := t.VerifyRSAPSSSignature(hash, publicKey)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to verify RSA-PSS signature using any of the allowed keys")
+}
+
+// verifyECDSASignatureWithKeys verifies ECDSA signature using the provided keys.
+func (t *Token) verifyECDSASignatureWithKeys(hash crypto.Hash, keyID string, allowedKeys map[string]any) error {
+	if keyID != "" {
+		if key, ok := allowedKeys[keyID]; ok {
+			publicKey, ok := key.(*ecdsa.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify ECDSA signature: public key type %T is invalid", key)
+			}
+			return t.VerifyECDSASignature(hash, publicKey)
+		}
+		return fmt.Errorf("failed to verify ECDSA signature using key %q", keyID)
+	}
+
+	for _, key := range allowedKeys {
+		publicKey, ok := key.(*ecdsa.PublicKey)
+		if !ok {
+			continue // Skip non-ECDSA keys
+		}
+		err := t.VerifyECDSASignature(hash, publicKey)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
+}
+
+// verifyEdDSASignatureWithKeys verifies EdDSA signature using the provided keys.
+func (t *Token) verifyEdDSASignatureWithKeys(keyID string, allowedKeys map[string]any) error {
+	if keyID != "" {
+		if key, ok := allowedKeys[keyID]; ok {
+			publicKey, ok := key.(ed25519.PublicKey)
+			if !ok {
+				return fmt.Errorf("failed to verify EdDSA signature: public key type %T is invalid", key)
+			}
+			return t.VerifyEdDSASignature(publicKey)
+		}
+		return fmt.Errorf("failed to verify EdDSA signature using key %q", keyID)
+	}
+
+	for _, key := range allowedKeys {
+		publicKey, ok := key.(ed25519.PublicKey)
+		if !ok {
+			continue // Skip non-EdDSA keys
+		}
+		err := t.VerifyEdDSASignature(publicKey)
+		if err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
 }
