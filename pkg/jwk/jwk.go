@@ -244,7 +244,7 @@ func SymmetricKey(v Value) (k string, err error) {
 	k = fmt.Sprintf("%v", v[K])
 
 	if k == "" {
-		err = fmt.Errorf("not symmetric key")
+		err = fmt.Errorf("no symmetric key value set")
 	}
 
 	return
@@ -470,7 +470,7 @@ func (s *Set) Get(keyID string) (Value, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("key %q found in set", keyID)
+	return nil, fmt.Errorf("key %q not found in set", keyID)
 }
 
 // FetchSet fetches a JWK set from the given URL and HTTP client.
