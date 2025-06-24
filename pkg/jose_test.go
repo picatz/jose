@@ -77,7 +77,7 @@ func TestExampleCreateJWTAndSignWithHS256(t *testing.T) {
 		},
 	}
 
-	signature, err := token.Sign("supersecret")
+	signature, err := token.Sign("supersecret-key-that-is-at-least-32-bytes-long-for-security")
 	require.NoError(t, err)
 	require.NotNil(t, signature)
 	require.NotEmpty(t, signature)
@@ -93,7 +93,7 @@ func TestExampleCreateJWTAndSignWithHS256(t *testing.T) {
 			jwt.Issuer:   "test",
 			jwt.IssuedAt: time.Now(),
 		},
-		"supersecret",
+		"supersecret-key-that-is-at-least-32-bytes-long-for-security",
 	)
 	require.NoError(t, err)
 
