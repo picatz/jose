@@ -587,7 +587,7 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 //
 // This only verifies the signature, and does not verify any
 // other claims, such as expiration time, issuer, audience, etc.
-func (t *Token) VerifySignature(allowedAlgs []string, allowedKeys map[string]any) error {
+func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[string]any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
 		return fmt.Errorf("failed to verify alg: %w", err)
