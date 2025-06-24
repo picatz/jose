@@ -138,5 +138,5 @@ func GenerateString(value jwk.Value, h crypto.Hash) (string, error) {
 		return "", err
 	}
 
-	return base64.Encode(thumbprint), nil
+	return base64.Encode(thumbprint)
 }

@@ -227,7 +227,13 @@ func TestParseStringAndVerify(t *testing.T) {
 				require.Equal(t, len(sig), len(token.Signature))
 				require.Equal(t, sig, token.Signature)
 
-				require.Equal(t, base64.Encode(sig), base64.Encode(token.Signature))
+				sigEnc, err := base64.Encode(sig)
+				require.NoError(t, err)
+				require.NotEmpty(t, sigEnc)
+
+				tokenSigEnc, err := base64.Encode(token.Signature)
+				require.NoError(t, err)
+				require.Equal(t, sigEnc, tokenSigEnc)
 
 				require.NoError(t, token.VerifyRSASignature(crypto.SHA256, rsaKeyPair.public))
 

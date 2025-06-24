@@ -409,13 +409,19 @@ func TestParsingVulnerabilities(t *testing.T) {
 		validSig := "signature"
 
 		// Base64 encode the parts
-		headerB64 := base64.Encode([]byte(invalidHeader))
-		claimsB64 := base64.Encode([]byte(validClaims))
-		sigB64 := base64.Encode([]byte(validSig))
+		headerB64, err := base64.Encode([]byte(invalidHeader))
+		require.NoError(t, err)
+		require.NotEmpty(t, headerB64)
+		claimsB64, err := base64.Encode([]byte(validClaims))
+		require.NoError(t, err)
+		require.NotEmpty(t, claimsB64)
+		sigB64, err := base64.Encode([]byte(validSig))
+		require.NoError(t, err)
+		require.NotEmpty(t, sigB64)
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
-		_, err := jwt.ParseString(malformedToken)
+		_, err = jwt.ParseString(malformedToken)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to decode JOSE header JSON")
 	})
@@ -427,13 +433,19 @@ func TestParsingVulnerabilities(t *testing.T) {
 		validSig := "signature"
 
 		// Base64 encode the parts
-		headerB64 := base64.Encode([]byte(validHeader))
-		claimsB64 := base64.Encode([]byte(invalidClaims))
-		sigB64 := base64.Encode([]byte(validSig))
+		headerB64, err := base64.Encode([]byte(validHeader))
+		require.NoError(t, err)
+		require.NotEmpty(t, headerB64)
+		claimsB64, err := base64.Encode([]byte(invalidClaims))
+		require.NoError(t, err)
+		require.NotEmpty(t, claimsB64)
+		sigB64, err := base64.Encode([]byte(validSig))
+		require.NoError(t, err)
+		require.NotEmpty(t, sigB64)
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
-		_, err := jwt.ParseString(malformedToken)
+		_, err = jwt.ParseString(malformedToken)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to decode claims JSON")
 	})
@@ -444,13 +456,19 @@ func TestParsingVulnerabilities(t *testing.T) {
 		invalidClaims := `{"exp":"not-a-number","iat":"also-not-a-number"}`
 		validSig := "signature"
 
-		headerB64 := base64.Encode([]byte(validHeader))
-		claimsB64 := base64.Encode([]byte(invalidClaims))
-		sigB64 := base64.Encode([]byte(validSig))
+		headerB64, err := base64.Encode([]byte(validHeader))
+		require.NoError(t, err)
+		require.NotEmpty(t, headerB64)
+		claimsB64, err := base64.Encode([]byte(invalidClaims))
+		require.NoError(t, err)
+		require.NotEmpty(t, claimsB64)
+		sigB64, err := base64.Encode([]byte(validSig))
+		require.NoError(t, err)
+		require.NotEmpty(t, sigB64)
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
-		_, err := jwt.ParseString(malformedToken)
+		_, err = jwt.ParseString(malformedToken)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid type")
 	})

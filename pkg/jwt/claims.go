@@ -55,7 +55,7 @@ func (claims ClaimsSet) Base64URLString() (string, error) {
 		return "", fmt.Errorf("jwt: claims set encoding error: %w", err)
 	}
 
-	return base64.Encode(buff.Bytes()), nil
+	return base64.Encode(buff.Bytes())
 }
 
 // Get returns the ClaimValue for the given ClaimName.

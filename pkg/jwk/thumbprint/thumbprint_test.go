@@ -24,7 +24,8 @@ func TestGenerate_EC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thumbprintString := base64.Encode(thumbprint)
+	thumbprintString, err := base64.Encode(thumbprint)
+	require.NoError(t, err)
 
 	require.Equal(t, "cn-I_WNMClehiVp51i_0VpOENW1upEerA8sEam5hn-s", thumbprintString)
 }
@@ -45,7 +46,8 @@ func TestGenerate_RSA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thumbprintString := base64.Encode(thumbprint)
+	thumbprintString, err := base64.Encode(thumbprint)
+	require.NoError(t, err)
 
 	require.Equal(t, "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs", thumbprintString)
 }

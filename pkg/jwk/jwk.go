@@ -393,11 +393,20 @@ func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
 func ValueFromPublicKey(pubKey any) (Value, error) {
 	switch pubKey := pubKey.(type) {
 	case *rsa.PublicKey:
+		n, err := base64.Encode(pubKey.N.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode RSA modulus: %w", err)
+		}
+		e, err := base64.Encode(big.NewInt(int64(pubKey.E)).Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode RSA exponent: %w", err)
+		}
+
 		value := Value{
 			KeyType:      "RSA",
 			PublicKeyUse: "sig",
-			N:            base64.Encode(pubKey.N.Bytes()),
-			E:            base64.Encode(big.NewInt(int64(pubKey.E)).Bytes()),
+			N:            n,
+			E:            e,
 		}
 
 		return value, nil
@@ -416,19 +425,32 @@ func ValueFromPublicKey(pubKey any) (Value, error) {
 			return nil, fmt.Errorf("invalid curve %q used for JWK value", pubKey.Curve)
 		}
 
+		x, err := base64.Encode(pubKey.X.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ECDSA X coordinate: %w", err)
+		}
+		y, err := base64.Encode(pubKey.Y.Bytes())
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ECDSA Y coordinate: %w", err)
+		}
+
 		return Value{
 			KeyType:      "EC",
 			PublicKeyUse: "sig",
 			Curve:        crv,
-			X:            base64.Encode(pubKey.X.Bytes()),
-			Y:            base64.Encode(pubKey.Y.Bytes()),
+			X:            x,
+			Y:            y,
 		}, nil
 	case ed25519.PublicKey:
+		x, err := base64.Encode(pubKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode Ed25519 public key: %w", err)
+		}
 		return Value{
 			KeyType:      "OKP",
 			PublicKeyUse: "sig",
 			Curve:        "Ed25519",
-			X:            base64.Encode(pubKey),
+			X:            x,
 		}, nil
 	default:
 		return nil, fmt.Errorf("invalid type %T used for JWK value", pubKey)

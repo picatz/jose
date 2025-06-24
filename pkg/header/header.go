@@ -148,7 +148,7 @@ func (h Parameters) Base64URLString() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrFailedToEncodeHeader, err)
 	}
-	return base64.Encode(buff.Bytes()), nil
+	return base64.Encode(buff.Bytes())
 }
 
 // Type returns the media type of this complete JOSE object (JWS or JWE).

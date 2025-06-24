@@ -181,7 +181,11 @@ func (t *Token) computeString() (string, error) {
 
 	if len(t.Signature) != 0 {
 		b.WriteString(dot)
-		b.WriteString(base64.Encode(t.Signature))
+		signature, err := base64.Encode(t.Signature)
+		if err != nil {
+			return "", fmt.Errorf("failed to encode signature: %w", err)
+		}
+		b.WriteString(signature)
 	}
 
 	if len(t.raw) == 0 {
@@ -386,9 +390,16 @@ func ParseString(input string) (*Token, error) {
 	}
 
 	// Lastly, we decode the signature base64 content.
-	b, err = base64.Decode(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
+	// For "none" algorithm, the signature part may be empty
+	var sigBytes []byte
+	if parts[2] != "" {
+		sigBytes, err = base64.Decode(parts[2])
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode signature base64: %w", err)
+		}
+	} else {
+		// Empty signature is allowed for "none" algorithm
+		sigBytes = []byte{}
 	}
 
 	// Create a new token object, with the header and raw input string.
@@ -398,7 +409,7 @@ func ParseString(input string) (*Token, error) {
 	token := &Token{
 		Header:    h,
 		Claims:    claims,
-		Signature: b,
+		Signature: sigBytes,
 		raw:       input,
 	}
 
