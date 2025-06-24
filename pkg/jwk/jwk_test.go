@@ -12,6 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// createTestHTTPContext creates a context and HTTP client for testing external JWK endpoints.
+func createTestHTTPContext(t *testing.T, timeout time.Duration) (context.Context, *http.Client) {
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	client := &http.Client{
+		Transport: http.DefaultTransport,
+		Timeout:   timeout,
+	}
+	t.Cleanup(cancel)
+	return ctx, client
+}
+
 func TestValueECDSA(t *testing.T) {
 	input := `
 	{
@@ -139,21 +150,13 @@ func TestSet(t *testing.T) {
 }
 
 func TestGoogleWellKnownCertsV3(t *testing.T) {
-	timeout := 5 * time.Second
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	client := &http.Client{
-		Transport: http.DefaultTransport,
-		Timeout:   timeout,
-	}
+	ctx, httpClient := createTestHTTPContext(t, 5*time.Second)
 
 	// https://accounts.google.com/.well-known/openid-configuration
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v3/certs", nil)
 	require.NoError(t, err)
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
 
 	set := Set{}
@@ -184,21 +187,13 @@ func TestGoogleWellKnownCertsV3(t *testing.T) {
 }
 
 func TestMicrosoftLoginWellKnownKeys(t *testing.T) {
-	timeout := 5 * time.Second
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	client := &http.Client{
-		Transport: http.DefaultTransport,
-		Timeout:   timeout,
-	}
+	ctx, httpClient := createTestHTTPContext(t, 5*time.Second)
 
 	// https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://login.microsoftonline.com/common/discovery/v2.0/keys", nil)
 	require.NoError(t, err)
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
 
 	set := Set{}
@@ -229,21 +224,13 @@ func TestMicrosoftLoginWellKnownKeys(t *testing.T) {
 }
 
 func TestGitHubActionsWellKnownKeys(t *testing.T) {
-	timeout := 5 * time.Second
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	client := &http.Client{
-		Transport: http.DefaultTransport,
-		Timeout:   timeout,
-	}
+	ctx, httpClient := createTestHTTPContext(t, 5*time.Second)
 
 	// https://token.actions.githubusercontent.com/.well-known/openid-configuration
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://token.actions.githubusercontent.com/.well-known/jwks", nil)
 	require.NoError(t, err)
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
 
 	set := Set{}
@@ -276,4 +263,71 @@ func TestURLSetCache(t *testing.T) {
 	firstKey, err := cache.GetKey(ctx, ghaJWKsURL, firstKeyID)
 	require.NoError(t, err)
 	require.NotEmpty(t, firstKey)
+}
+
+func TestErrorMessages(t *testing.T) {
+	t.Run("ECDSAValues with non-EC key type", func(t *testing.T) {
+		value := Value{
+			KeyType: "RSA",
+		}
+		_, _, _, err := ECDSAValues(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "JWK value is not EC")
+	})
+
+	t.Run("RSAValues with non-RSA key type", func(t *testing.T) {
+		value := Value{
+			KeyType: "EC",
+		}
+		_, _, _, err := RSAValues(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "JWK value is not RSA")
+	})
+
+	t.Run("SymmetricKey with no key value", func(t *testing.T) {
+		value := Value{
+			K: "",
+		}
+		_, err := SymmetricKey(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no symmetric key value set")
+	})
+
+	t.Run("Set.Get with non-existent key", func(t *testing.T) {
+		set := &Set{
+			Keys: []Value{
+				{
+					KeyID: "key1",
+				},
+			},
+		}
+		_, err := set.Get("nonexistent")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "key \"nonexistent\" not found in set")
+	})
+}
+
+func TestValidate(t *testing.T) {
+	t.Run("valid EC key with P-256 curve", func(t *testing.T) {
+		value := Value{
+			KeyType: "EC",
+			Curve:   "P-256",
+			X:       "dGVzdA", // base64 encoded "test"
+			Y:       "dGVzdA", // base64 encoded "test"
+		}
+		err := Validate(value)
+		require.NoError(t, err)
+	})
+
+	t.Run("invalid EC key with unsupported curve", func(t *testing.T) {
+		value := Value{
+			KeyType: "EC",
+			Curve:   "secp256k1", // unsupported curve
+			X:       "dGVzdA",
+			Y:       "dGVzdA",
+		}
+		err := Validate(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid curve")
+	})
 }
