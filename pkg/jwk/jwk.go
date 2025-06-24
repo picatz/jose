@@ -51,7 +51,7 @@ const (
 	D RSA = "d" // D is the RSA private exponent value.
 )
 
-// Values is a JSON object containing the parameters describing
+// Value is a JSON object containing the parameters describing
 // the cryptographic operations and parameters employed.
 //
 // https://datatracker.ietf.org/doc/html/rfc7517#section-4
@@ -193,7 +193,7 @@ func RSAValues(v Value) (n, e, d string, err error) {
 // ECDSAValues returns the values for the ECDSA key type.
 func ECDSAValues(v Value) (crv, x, y string, err error) {
 	if v[KeyType] != "EC" {
-		err = fmt.Errorf("JWK value is not RSA")
+		err = fmt.Errorf("JWK value is not EC")
 		return
 	}
 
@@ -353,7 +353,7 @@ func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err e
 
 	yBytes, err := base64.Decode(yEnc)
 	if err != nil {
-		err = fmt.Errorf("failed to decode ECDSA public key X: %w", err)
+		err = fmt.Errorf("failed to decode ECDSA public key Y: %w", err)
 		return
 	}
 	y.SetBytes(yBytes)
