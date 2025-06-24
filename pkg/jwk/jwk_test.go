@@ -240,7 +240,7 @@ func TestGitHubActionsWellKnownKeys(t *testing.T) {
 }
 
 func TestURLSetCache(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
 	cache := NewURLSetCache(http.DefaultClient, 24*time.Hour, 6*time.Hour)
