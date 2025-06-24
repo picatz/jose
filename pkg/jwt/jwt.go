@@ -1245,10 +1245,17 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		case []string:
 			// If the audience is a slice, then we need to check if any of the
 			// audiences are in the allowed audiences.
+			//
+			// https://datatracker.ietf.org/doc/html/rfc7519#section-4.1.3
+			found := false
 			for _, audience := range aud {
-				if !slices.Contains(config.AllowedAudiences, audience) {
-					return fmt.Errorf("requested audience %q is not allowed", audience)
+				if slices.Contains(config.AllowedAudiences, audience) {
+					found = true
+					break
 				}
+			}
+			if !found {
+				return fmt.Errorf("none of the requested audiences %q are allowed", aud)
 			}
 		default:
 			return fmt.Errorf("invalid audience type %T in token claims", t.Claims[Audience])
