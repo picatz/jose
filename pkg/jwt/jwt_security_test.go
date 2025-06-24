@@ -109,7 +109,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 
 		err := token.Verify(jwt.WithKey(testHMACSecretKey))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "paramater not found")
+		require.Contains(t, err.Error(), "parameter not found")
 	})
 
 	t.Run("Empty Algorithm Header", func(t *testing.T) {

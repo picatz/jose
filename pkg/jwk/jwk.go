@@ -18,23 +18,23 @@ import (
 
 // https://datatracker.ietf.org/doc/html/rfc7517#section-4
 type (
-	ParamaterName = string
+	ParameterName = string
 
-	RSA       = ParamaterName
-	ECDSA     = ParamaterName
-	Symmetric = ParamaterName
+	RSA       = ParameterName
+	ECDSA     = ParameterName
+	Symmetric = ParameterName
 )
 
 const (
-	KeyType              ParamaterName = "kty"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.1
-	PublicKeyUse         ParamaterName = "use"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
-	KeyOperations        ParamaterName = "key_ops"  // https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
-	Algorithm            ParamaterName = "alg"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
-	KeyID                ParamaterName = "kid"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.5
-	X509URL              ParamaterName = "x5u"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.6
-	X509CertificateChain ParamaterName = "x5c"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.7
-	X509SHA1Thumbprint   ParamaterName = "x5t"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.8
-	X509SHA256Thumbprint ParamaterName = "x5t#S256" // https://datatracker.ietf.org/doc/html/rfc7517#section-4.9
+	KeyType              ParameterName = "kty"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.1
+	PublicKeyUse         ParameterName = "use"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.2
+	KeyOperations        ParameterName = "key_ops"  // https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
+	Algorithm            ParameterName = "alg"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.4
+	KeyID                ParameterName = "kid"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.5
+	X509URL              ParameterName = "x5u"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.6
+	X509CertificateChain ParameterName = "x5c"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.7
+	X509SHA1Thumbprint   ParameterName = "x5t"      // https://datatracker.ietf.org/doc/html/rfc7517#section-4.8
+	X509SHA256Thumbprint ParameterName = "x5t#S256" // https://datatracker.ietf.org/doc/html/rfc7517#section-4.9
 
 	// K is the symmetric key value within a JWK.
 	// https://datatracker.ietf.org/doc/html/rfc7517#appendix-A.3
@@ -55,21 +55,21 @@ const (
 // the cryptographic operations and parameters employed.
 //
 // https://datatracker.ietf.org/doc/html/rfc7517#section-4
-type Value = map[ParamaterName]any
+type Value = map[ParameterName]any
 
 // Validate checks that the required parameters are present for
 // the given key type, and that the values are valid.
 func Validate(v Value) error {
 	_, ok := v[KeyType]
 	if !ok {
-		return fmt.Errorf("missing required paramater %q", KeyType)
+		return fmt.Errorf("missing required parameter %q", KeyType)
 	}
 
 	switch v[KeyType] {
 	case "EC":
 		curveValue, ok := v[Curve]
 		if !ok {
-			return fmt.Errorf("missing required paramater %q", Curve)
+			return fmt.Errorf("missing required parameter %q", Curve)
 		}
 
 		if curve, ok := curveValue.(string); ok {
@@ -89,7 +89,7 @@ func Validate(v Value) error {
 
 		xValue, ok := v[X]
 		if !ok {
-			return fmt.Errorf("missing required paramater %q", X)
+			return fmt.Errorf("missing required parameter %q", X)
 		}
 
 		if x, ok := xValue.(string); ok {
@@ -103,7 +103,7 @@ func Validate(v Value) error {
 
 		yValue, ok := v[Y]
 		if !ok {
-			return fmt.Errorf("missing required paramater %q", Y)
+			return fmt.Errorf("missing required parameter %q", Y)
 		}
 
 		if y, ok := yValue.(string); ok {
@@ -117,7 +117,7 @@ func Validate(v Value) error {
 	case "RSA":
 		nValue, ok := v[N]
 		if !ok {
-			return fmt.Errorf("missing required paramater %q", N)
+			return fmt.Errorf("missing required parameter %q", N)
 		}
 
 		if n, ok := nValue.(string); ok {
@@ -131,7 +131,7 @@ func Validate(v Value) error {
 
 		eValue, ok := v[E]
 		if !ok {
-			return fmt.Errorf("missing required paramater %q", E)
+			return fmt.Errorf("missing required parameter %q", E)
 		}
 
 		if e, ok := eValue.(string); ok {

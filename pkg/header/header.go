@@ -11,40 +11,40 @@ import (
 )
 
 var (
-	// ErrParamaterNotFound is returned when a paramater is not found in the header.
-	ErrParamaterNotFound = errors.New("header: paramater not found")
+	// ErrParameterNotFound is returned when a parameter is not found in the header.
+	ErrParameterNotFound = errors.New("header: parameter not found")
 
-	// ErrInvalidParamaterType is returned when a paramater is not the expected type.
-	ErrInvalidParamaterType = errors.New("header: invalid paramater type")
+	// ErrInvalidParameterType is returned when a parameter is not the expected type.
+	ErrInvalidParameterType = errors.New("header: invalid parameter type")
 
 	// ErrFailedToEncodeHeader is returned when the header fails to be encoded.
 	ErrFailedToEncodeHeader = errors.New("header: failed to base64 URL encode")
 )
 
-// ParamaterName is one of three types: registered, public, or private.
+// ParameterName is one of three types: registered, public, or private.
 //
 // https://datatracker.ietf.org/doc/html/rfc7515#section-4
 type (
-	ParamaterName = string
+	ParameterName = string
 
-	// Registered header paramater names from the IANA registry.
+	// Registered header parameter names from the IANA registry.
 	//
 	// https://datatracker.ietf.org/doc/html/rfc7515#section-4.1
-	Registered = ParamaterName
+	Registered = ParameterName
 
-	// Public header paramater names that are not registered,
+	// Public header parameter names that are not registered,
 	// but should be collision resistant.
 	//
 	// https://datatracker.ietf.org/doc/html/rfc7515#section-4.2
-	Public = ParamaterName
+	Public = ParameterName
 
-	// Private header paramater names for use in private agreements.
+	// Private header parameter names for use in private agreements.
 	//
 	// https://datatracker.ietf.org/doc/html/rfc7515#section-4.3
-	Private = ParamaterName
+	Private = ParameterName
 )
 
-// Registered header paramater names used in JWS and JWE.
+// Registered header parameter names used in JWS and JWE.
 //
 // # IANA Registry
 //
@@ -138,7 +138,7 @@ const (
 // of a set of Header Parameters.
 //
 // https://datatracker.ietf.org/doc/html/rfc7515#section-2
-type Parameters map[ParamaterName]any
+type Parameters map[ParameterName]any
 
 // Base64URLString returns the JOSE header as a base64 URL encoded string
 // suitable for use in a JWS or JWE.
@@ -155,11 +155,11 @@ func (h Parameters) Base64URLString() (string, error) {
 func (h Parameters) Type() (string, error) {
 	value, ok := h[Type]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParamaterNotFound, Type)
+		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, Type)
 	}
 	strValue, ok := value.(string)
 	if !ok {
-		return "", fmt.Errorf("%w: %q: is type %T, not string", ErrInvalidParamaterType, Type, value)
+		return "", fmt.Errorf("%w: %q: is type %T, not string", ErrInvalidParameterType, Type, value)
 	}
 	return strValue, nil
 }
@@ -169,7 +169,7 @@ func (h Parameters) Type() (string, error) {
 func (h Parameters) Algorithm() (jwa.Algorithm, error) {
 	value, ok := h[Algorithm]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParamaterNotFound, Algorithm)
+		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, Algorithm)
 	}
 
 	alg, ok := value.(jwa.Algorithm)
@@ -177,7 +177,7 @@ func (h Parameters) Algorithm() (jwa.Algorithm, error) {
 		return alg, nil
 	}
 
-	return "", fmt.Errorf("%w: %q: is type %T, not algorithm", ErrInvalidParamaterType, Algorithm, value)
+	return "", fmt.Errorf("%w: %q: is type %T, not algorithm", ErrInvalidParameterType, Algorithm, value)
 }
 
 // SymetricAlgorithm returns the symetric algorithm used in the header,
@@ -225,16 +225,16 @@ func (h Parameters) AsymetricAlgorithm() (bool, error) {
 // This is a convenience function for accessing the value of a paramater from the JOSE header
 // without having to check if the paramater exists in the header first. This function will
 // return an error if the paramater does not exist in the header.
-func (h Parameters) Get(param ParamaterName) (any, error) {
+func (h Parameters) Get(param ParameterName) (any, error) {
 	value, ok := h[param]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParamaterNotFound, param)
+		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, param)
 	}
 	return value, nil
 }
 
-// Has returns true if the given paramater name exists in the set of JOSE header paramaters.
-func (h Parameters) Has(param ParamaterName) bool {
+// Has returns true if the given parameter name exists in the set of JOSE header parameters.
+func (h Parameters) Has(param ParameterName) bool {
 	_, ok := h[param]
 	return ok
 }

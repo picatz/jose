@@ -32,7 +32,7 @@ import (
 //	}
 //
 // https://www.rfc-editor.org/rfc/rfc7515.html#section-3.3
-const Type header.ParamaterName = "JWT"
+const Type header.ParameterName = "JWT"
 
 // Token is a decoded JSON Web Token, a string representing a
 // set of claims as a JSON object that is encoded in a JWS or

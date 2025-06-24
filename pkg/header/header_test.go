@@ -71,7 +71,7 @@ func TestJSONDecode(t *testing.T) {
 			check: func(t *testing.T, params Parameters) {
 				typ, err := params.Type()
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrParamaterNotFound)
+				require.ErrorIs(t, err, ErrParameterNotFound)
 				require.Equal(t, "", typ)
 			},
 		},
@@ -81,7 +81,7 @@ func TestJSONDecode(t *testing.T) {
 			check: func(t *testing.T, params Parameters) {
 				alg, err := params.Algorithm()
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrParamaterNotFound)
+				require.ErrorIs(t, err, ErrParameterNotFound)
 				require.Equal(t, "", alg)
 			},
 		},
@@ -91,7 +91,7 @@ func TestJSONDecode(t *testing.T) {
 			check: func(t *testing.T, params Parameters) {
 				typ, err := params.Type()
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrInvalidParamaterType)
+				require.ErrorIs(t, err, ErrInvalidParameterType)
 				require.Equal(t, "", typ)
 			},
 		},
@@ -101,7 +101,7 @@ func TestJSONDecode(t *testing.T) {
 			check: func(t *testing.T, params Parameters) {
 				alg, err := params.Algorithm()
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrInvalidParamaterType)
+				require.ErrorIs(t, err, ErrInvalidParameterType)
 				require.Equal(t, "", alg)
 			},
 		},

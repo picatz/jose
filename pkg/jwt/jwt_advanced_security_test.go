@@ -228,7 +228,7 @@ func TestSecurityEdgeCases(t *testing.T) {
 				name:        "Missing algorithm header",
 				headerJson:  `{"typ":"JWT"}`,
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "paramater not found") },
+				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "parameter not found") },
 			},
 			{
 				name:        "Null algorithm header",
