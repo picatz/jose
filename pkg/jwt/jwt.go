@@ -610,8 +610,20 @@ func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[str
 		return fmt.Errorf("requested algorithm %q is not allowed", alg)
 	}
 
+	// Special handling for "none" algorithm - require explicit allowance
+	if alg == jwa.None {
+		if !slices.Contains(allowedAlgs, jwa.None) {
+			return fmt.Errorf("algorithm %q is not allowed", alg)
+		}
+		// For "none" algorithm, signature must be empty
+		if len(t.Signature) != 0 {
+			return fmt.Errorf("signature must be empty for algorithm %q", alg)
+		}
+		return nil
+	}
+
 	// Require a key (symmetric or asymmetric) for all algorithms except "none".
-	if len(allowedKeys) == 0 && !slices.Contains(allowedAlgs, jwa.None) {
+	if len(allowedKeys) == 0 {
 		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
 	}
 
