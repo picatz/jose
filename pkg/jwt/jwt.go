@@ -828,7 +828,7 @@ func (t *Token) VerifyHMACSignature(hash crypto.Hash, key any) error {
 
 // validateRSAKeySize validates that the RSA key meets the minimum size requirement per RFC 7518.
 // RSA keys must be at least 2048 bits (256 bytes) for RSA-based JWT algorithms.
-func validateRSAKeySize(key interface{}) error {
+func validateRSAKeySize(key any) error {
 	const minKeySize = 2048                // bits
 	const minKeySizeBytes = minKeySize / 8 // 256 bytes
 
@@ -1754,7 +1754,7 @@ func (t *Token) validateCriticalHeaders(supportedCriticalHeaders []string) error
 	}
 
 	// The "crit" header must be an array of strings
-	critArray, ok := critValue.([]interface{})
+	critArray, ok := critValue.([]any)
 	if !ok {
 		return fmt.Errorf("critical header parameter \"crit\" must be an array")
 	}
