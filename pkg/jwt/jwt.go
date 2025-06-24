@@ -91,7 +91,7 @@ func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Toke
 		return nil, fmt.Errorf("cannot create token with empty header parameters")
 	}
 
-	// Given claims set cannot be emtpy.
+	// Given claims set cannot be empty.
 	if len(claims) == 0 {
 		return nil, fmt.Errorf("cannot create token with empty claims set")
 	}

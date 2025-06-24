@@ -163,7 +163,7 @@ func TestParseStringAndVerify(t *testing.T) {
 		check func(t *testing.T, token *jwt.Token, err error)
 	}{
 		{
-			name: "emtpy",
+			name: "empty",
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				require.Error(t, err)
 				require.Nil(t, token)
