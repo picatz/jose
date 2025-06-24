@@ -342,6 +342,7 @@ func TestNew(t *testing.T) {
 		signingKey              any
 		verifyKey               any
 		allowedVerifyAlgorithms []jwa.Algorithm
+		allowedAudiences        []string
 	}{
 		{
 			name: "RSA SHA256",
@@ -355,6 +356,36 @@ func TestNew(t *testing.T) {
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
 			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+		},
+		{
+			name: "RSA SHA256 with audience as string",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
+				header.Algorithm: jwa.RS256,
+			},
+			claims: jwt.ClaimsSet{
+				jwt.Subject:  "test",
+				jwt.Audience: "test",
+			},
+			signingKey:              rsaKeyPair.private,
+			verifyKey:               rsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedAudiences:        []string{"test"},
+		},
+		{
+			name: "RSA SHA256 with audience as an array",
+			header: header.Parameters{
+				header.Type:      jwt.Type,
+				header.Algorithm: jwa.RS256,
+			},
+			claims: jwt.ClaimsSet{
+				jwt.Subject:  "test",
+				jwt.Audience: []string{"test"},
+			},
+			signingKey:              rsaKeyPair.private,
+			verifyKey:               rsaKeyPair.public,
+			allowedVerifyAlgorithms: jwt.DefaultAllowedAlogrithms(),
+			allowedAudiences:        []string{"test"},
 		},
 		{
 			name: "RSA PSS SHA256",
@@ -431,6 +462,10 @@ func TestNew(t *testing.T) {
 				default:
 					t.Fatalf("potentially unsupported verify key type: %T", verifyKey)
 				}
+			}
+
+			if len(test.allowedAudiences) > 0 {
+				verifyOpts = append(verifyOpts, jwt.WithAllowedAudiences(test.allowedAudiences...))
 			}
 
 			err := token.Verify(verifyOpts...)

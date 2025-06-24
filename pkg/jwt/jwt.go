@@ -108,9 +108,9 @@ func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Toke
 				claims[name] = v.Unix()
 			// bad
 			default:
-				return nil, fmt.Errorf("cannot use %T with %q", v, ExpirationTime)
+				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
 			}
-		case Issuer, Subject, Audience:
+		case Issuer, Subject:
 			switch v := value.(type) {
 			// good
 			case string:
@@ -119,7 +119,20 @@ func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Toke
 				claims[name] = v.String()
 			// bad
 			default:
-				return nil, fmt.Errorf("cannot use %T with %q", v, ExpirationTime)
+				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
+			}
+		case Audience:
+			switch v := value.(type) {
+			// good
+			case string:
+			// ok
+			case fmt.Stringer:
+				claims[name] = v.String()
+			// meh, but ok
+			case []string:
+			// bad
+			default:
+				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
 			}
 		}
 	}
@@ -1279,10 +1292,23 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	//
 	// Otherwise, the audience must be in the allowed audiences map.
 	if config.AllowedAudiences != nil {
-		audience := fmt.Sprintf("%s", t.Claims[Audience])
-
-		if !slices.Contains(config.AllowedAudiences, audience) {
-			return fmt.Errorf("requested audience %q is not allowed", audience)
+		switch aud := t.Claims[Audience].(type) {
+		case string:
+			// If the audience is a string, then we need to check if the audience
+			// is in the allowed audiences.
+			if !slices.Contains(config.AllowedAudiences, aud) {
+				return fmt.Errorf("requested audience %q is not allowed", aud)
+			}
+		case []string:
+			// If the audience is a slice, then we need to check if any of the
+			// audiences are in the allowed audiences.
+			for _, audience := range aud {
+				if !slices.Contains(config.AllowedAudiences, audience) {
+					return fmt.Errorf("requested audience %q is not allowed", audience)
+				}
+			}
+		default:
+			return fmt.Errorf("invalid audience type %T in token claims", t.Claims[Audience])
 		}
 	}
 
