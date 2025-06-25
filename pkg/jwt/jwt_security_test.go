@@ -377,7 +377,7 @@ func TestKeyValidation(t *testing.T) {
 		// This should be caught at the verification level
 		err := token.VerifyEdDSASignature(invalidKey)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid private EdDSA public key size")
+		require.Contains(t, err.Error(), "invalid Ed25519 public key size")
 	})
 }
 

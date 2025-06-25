@@ -34,20 +34,20 @@ func Generate(value jwk.Value, h crypto.Hash) ([]byte, error) {
 	}
 
 	// Ensure the key type is included.
-	if _, ok := subset["kty"]; !ok {
+	if _, ok := subset[jwk.KeyType]; !ok {
 		return nil, ErrInvalidKey
 	}
 
 	// Ensure the key type is valid.
-	switch subset["kty"] {
+	switch subset[jwk.KeyType] {
 	case "RSA":
 		// Ensure the modulus is included.
-		if _, ok := subset["n"]; !ok {
+		if _, ok := subset[jwk.N]; !ok {
 			return nil, ErrInvalidKey
 		}
 
 		// Ensure the exponent is included.
-		if _, ok := subset["e"]; !ok {
+		if _, ok := subset[jwk.E]; !ok {
 			return nil, ErrInvalidKey
 		}
 
@@ -57,17 +57,17 @@ func Generate(value jwk.Value, h crypto.Hash) ([]byte, error) {
 		}
 	case "EC":
 		// Ensure the curve is included.
-		if _, ok := subset["crv"]; !ok {
+		if _, ok := subset[jwk.Curve]; !ok {
 			return nil, ErrInvalidKey
 		}
 
 		// Ensure the x coordinate is included.
-		if _, ok := subset["x"]; !ok {
+		if _, ok := subset[jwk.X]; !ok {
 			return nil, ErrInvalidKey
 		}
 
 		// Ensure the y coordinate is included.
-		if _, ok := subset["y"]; !ok {
+		if _, ok := subset[jwk.Y]; !ok {
 			return nil, ErrInvalidKey
 		}
 

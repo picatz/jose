@@ -1,5 +1,45 @@
 package jwa
 
+import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
+)
+
+// PrivateKey is a type that can be used to sign JOSE objects (JWS, JWT),
+// such as a *[crypto/rsa.PrivateKey] or *[crypto/ecdsa.PrivateKey].
+//
+// This may be a shared secret key, such as a []byte or string, but
+// this is not recommended.
+type PrivateKey interface {
+	*rsa.PrivateKey | *ecdsa.PrivateKey | ed25519.PrivateKey | []byte | string
+}
+
+// PublicKey is a type that can be used to verify JOSE objects (JWS, JWT) using
+// an asymmetric algorithm, such as *[crypto/rsa.PublicKey] or *[crypto/ecdsa.PublicKey]
+// or [crypto/ed25519.PublicKey].
+type PublicKey interface {
+	*rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
+}
+
+// SymmetricKey is a type that can be used to sign or verify JOSE objects (JWS, JWT) using
+// a symmetric algorithm, such as HMAC.
+type SymmetricKey interface {
+	[]byte | string
+}
+
+// VerifyKey is a type that can be used to verify JOSE objects (JWS, JWT) using
+// either a symmetric or asymmetric algorithm.
+type VerifyKey interface {
+	PublicKey | SymmetricKey
+}
+
+// SigningKey is a type that can be used to sign JOSE objects (JWS, JWT) using
+// either a symmetric or asymmetric algorithm.
+type SigningKey interface {
+	PrivateKey | SymmetricKey
+}
+
 // Algorithm represents a cryptographic algorithm used for signing or
 // encrypting a JWS or JWE object respectively.
 //
@@ -13,6 +53,9 @@ type Algorithm = string
 // [RFC2104] employing SHA-2 [SHS] hash functions.
 //
 // https://datatracker.ietf.org/doc/html/rfc7518#section-3.2
+//
+// [RFC2104]: https://datatracker.ietf.org/doc/html/rfc2104
+// [SHS]: https://datatracker.ietf.org/doc/html/rfc6234
 const (
 	HS256 Algorithm = "HS256"
 	HS384 Algorithm = "HS384"

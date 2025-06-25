@@ -41,7 +41,7 @@ func main() {
 
 	tokenString := token.String()
 
-	for i := 0; i < 500000; i++ {
+	for range 500000 {
 		// parse and verify the token
 		_, err := jwt.ParseAndVerify(tokenString, jwt.WithIdentifiableKey(symmetricKeyID, symmetricKey))
 		if err != nil {

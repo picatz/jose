@@ -5,16 +5,15 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
@@ -85,7 +84,7 @@ type Token struct {
 //   - PS256, PS384, PS512: *rsa.PrivateKey
 //   - ES256, ES384, ES512: *ecdsa.PrivateKey
 //   - EdDSA: ed25519.PrivateKey
-func New[T SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Token, error) {
+func New[T jwa.SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Token, error) {
 	// Given params set cannot be empty.
 	if len(params) == 0 {
 		return nil, fmt.Errorf("cannot create token with empty header parameters")
@@ -166,16 +165,28 @@ const dot = "."
 func (t *Token) computeString() (string, error) {
 	b := strings.Builder{}
 
-	header, err := t.Header.Base64URLString()
+	// Marshal header directly to avoid newlines (consistent with signingInput)
+	headerBytes, err := json.Marshal(t.Header)
 	if err != nil {
-		return "", fmt.Errorf("failed to compute header base64 string: %w", err)
+		return "", fmt.Errorf("failed to marshal header: %w", err)
+	}
+
+	header, err := base64.Encode(headerBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode header: %w", err)
 	}
 	b.WriteString(header)
 	b.WriteString(dot)
 
-	claims, err := t.Claims.Base64URLString()
+	// Marshal claims directly to avoid newlines (consistent with signingInput)
+	claimsBytes, err := json.Marshal(t.Claims)
 	if err != nil {
-		return "", fmt.Errorf("failed to compute claims base64 string: %w", err)
+		return "", fmt.Errorf("failed to marshal claims: %w", err)
+	}
+
+	claims, err := base64.Encode(claimsBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode claims: %w", err)
 	}
 	b.WriteString(claims)
 
@@ -211,39 +222,6 @@ func (t *Token) String() string {
 	}
 
 	return s
-}
-
-// PrivateKey is a type that can be used to sign a JWT,
-// such as a *rsa.PrivateKey or *ecdsa.PrivateKey.
-//
-// This may be a shared secret key, such as a []byte or string, but
-// this is not recommended.
-type PrivateKey interface {
-	*rsa.PrivateKey | *ecdsa.PrivateKey | ed25519.PrivateKey | []byte | string
-}
-
-// PublicKey is a type that can be used to verify a JWT using
-// an asymmetric algorithm, such as *rsa.PublicKey or *ecdsa.PublicKey.
-type PublicKey interface {
-	*rsa.PublicKey | *ecdsa.PublicKey | ed25519.PublicKey
-}
-
-// SymmetricKey is a type that can be used to sign or verify a JWT using
-// a symmetric algorithm, such as HMAC.
-type SymmetricKey interface {
-	[]byte | string
-}
-
-// VerifyKey is a type that can be used to verify a JWT using
-// either a symmetric or asymmetric algorithm.
-type VerifyKey interface {
-	PublicKey | SymmetricKey
-}
-
-// SigningKey is a type that can be used to sign a JWT using
-// either a symmetric or asymmetric algorithm.
-type SigningKey interface {
-	PrivateKey | SymmetricKey
 }
 
 // Parseable is a type that can be parsed into a JWT,
@@ -304,17 +282,6 @@ func ParseString(input string) (*Token, error) {
 		return nil, fmt.Errorf("failed to split token: %w", err)
 	}
 
-	// Validate base64url format for each part (RFC compliance)
-	if err := validateBase64URLString(parts[0]); err != nil {
-		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
-	}
-	if err := validateBase64URLString(parts[1]); err != nil {
-		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
-	}
-	if err := validateBase64URLString(parts[2]); err != nil {
-		return nil, fmt.Errorf("failed to decode signature base64: %w", err)
-	}
-
 	// Next, we decode the header base64 content.
 	b, err := base64.Decode(parts[0])
 	if err != nil {
@@ -325,9 +292,12 @@ func ParseString(input string) (*Token, error) {
 	if len(b) == 0 {
 		return nil, fmt.Errorf("failed to decode JOSE header JSON: header cannot be empty")
 	}
+	if !utf8.Valid(b) {
+		return nil, fmt.Errorf("header is not valid UTF-8")
+	}
 
 	// Decode the header JSON.
-	h := jws.Header{}
+	h := header.Parameters{}
 	err = json.Unmarshal(b, &h)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
@@ -356,34 +326,63 @@ func ParseString(input string) (*Token, error) {
 		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
 	}
 
-	// Ensure we're using the correct types for registered claims.
+	// Ensure we're using the correct types for registered claims per RFC 7519.
+	// Handle potential precision loss and edge cases in numeric conversions.
 	{
+		// Process IssuedAt claim
 		if issuedAt, ok := claims[IssuedAt]; ok {
 			switch v := issuedAt.(type) {
-			case int64: // good
-			case float64: // ok
+			case int64: // Already correct type
+			case float64: // Common from JSON unmarshaling
+				// Check for potential precision loss or invalid values
+				if v != v { // NaN check
+					return nil, fmt.Errorf("invalid NaN value for %q claim", IssuedAt)
+				}
+				if v < 0 || v > 253402300799 { // Unix timestamp bounds (year 9999)
+					return nil, fmt.Errorf("invalid timestamp value %v for %q claim", v, IssuedAt)
+				}
 				claims[IssuedAt] = int64(v)
-			default: // bad
+			case int: // Handle int type
+				claims[IssuedAt] = int64(v)
+			default:
 				return nil, fmt.Errorf("invalid type %T used for %q", v, IssuedAt)
 			}
 		}
 
+		// Process ExpirationTime claim
 		if expirationTime, ok := claims[ExpirationTime]; ok {
 			switch v := expirationTime.(type) {
-			case int64: // good
-			case float64: // ok
+			case int64: // Already correct type
+			case float64: // Common from JSON unmarshaling
+				if v != v { // NaN check
+					return nil, fmt.Errorf("invalid NaN value for %q claim", ExpirationTime)
+				}
+				if v < 0 || v > 253402300799 { // Unix timestamp bounds
+					return nil, fmt.Errorf("invalid timestamp value %v for %q claim", v, ExpirationTime)
+				}
 				claims[ExpirationTime] = int64(v)
-			default: // bad
+			case int: // Handle int type
+				claims[ExpirationTime] = int64(v)
+			default:
 				return nil, fmt.Errorf("invalid type %T used for %q", v, ExpirationTime)
 			}
 		}
 
+		// Process NotBefore claim
 		if notBefore, ok := claims[NotBefore]; ok {
 			switch v := notBefore.(type) {
-			case int64: // good
-			case float64: // ok
+			case int64: // Already correct type
+			case float64: // Common from JSON unmarshaling
+				if v != v { // NaN check
+					return nil, fmt.Errorf("invalid NaN value for %q claim", NotBefore)
+				}
+				if v < 0 || v > 253402300799 { // Unix timestamp bounds
+					return nil, fmt.Errorf("invalid timestamp value %v for %q claim", v, NotBefore)
+				}
 				claims[NotBefore] = int64(v)
-			default: // bad
+			case int: // Handle int type
+				claims[NotBefore] = int64(v)
+			default:
 				return nil, fmt.Errorf("invalid type %T used for %q", v, NotBefore)
 			}
 		}
@@ -519,7 +518,7 @@ func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
 // This is the preferred way to add a key to the set of allowed keys,
 // because it will ensure that the givne key is of the correct type
 // at compile time.
-func WithKey[T VerifyKey](key T) VerifyOption {
+func WithKey[T jwa.VerifyKey](key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
 		if vc.AllowedKeys == nil {
 			vc.AllowedKeys = make(map[string]any)
@@ -547,7 +546,7 @@ func WithKey[T VerifyKey](key T) VerifyOption {
 // This is the preferred way to add a key to the set of allowed keys,
 // because it will ensure that the givne key is of the correct type
 // at compile time.
-func WithIdentifiableKey[T VerifyKey](kid string, key T) VerifyOption {
+func WithIdentifiableKey[T jwa.VerifyKey](kid string, key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
 		if vc.AllowedKeys == nil {
 			vc.AllowedKeys = make(map[string]any)
@@ -665,7 +664,8 @@ func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[str
 		return fmt.Errorf("requested algorithm %q is not allowed", alg)
 	}
 
-	// Special handling for "none" algorithm - require explicit allowance
+	// Special handling for "none" algorithm per RFC 7518 Section 3.1
+	// Note: Additional check for InsecureAllowNone is done in the Verify method
 	if alg == jwa.None {
 		if !slices.Contains(allowedAlgs, jwa.None) {
 			return fmt.Errorf("algorithm %q is not allowed", alg)
@@ -712,220 +712,77 @@ func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[str
 // HMACSignature returns the HMAC signature of the token using the
 // given hash and key.
 func (t *Token) HMACSignature(hash crypto.Hash, key any) ([]byte, error) {
-	var secretKey []byte
-
-	// If the key is a string, convert it to a byte slice.
-	switch keyTyped := key.(type) {
-	case []byte:
-		secretKey = keyTyped
-	case string:
-		secretKey = []byte(keyTyped)
-	default:
-		return nil, fmt.Errorf("secret key is %T, not a byte slice or string", key)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	// Ensure the secret key is not empty.
-	if len(secretKey) == 0 {
-		return nil, fmt.Errorf("no secret key provided, cannot complete operation")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	// Validate minimum key length for security
-	minKeyLength := hash.Size()
-	if len(secretKey) < minKeyLength {
-		return nil, fmt.Errorf("HMAC key must be at least %d bytes for %s algorithm, got %d bytes", minKeyLength, hash.String(), len(secretKey))
-	}
-
-	// Ensure the hash is available.
-	if !hash.Available() {
-		return nil, fmt.Errorf("requested hash is not available")
-	}
-
-	var data string
-
-	if parts := strings.Split(t.raw, dot); len(parts) >= 2 {
-		data = strings.Join(parts[0:2], dot)
-	} else {
-		str, err := t.Header.Base64URLString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate JOSE header base64 string: %w", err)
-		}
-		data = str
-
-		claims, err := t.Claims.Base64URLString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate claims base64 string: %w", err)
-		}
-		data += (dot + claims)
-	}
-
-	h := hmac.New(hash.New, secretKey)
-
-	b := []byte(data)
-	h.Write(b)
-
-	sig := h.Sum(nil)
-	return sig, nil
-}
-
-// hmacSignatureForVerification returns the HMAC signature without key size validation
-// This is used for verifying existing tokens that may have been created with weaker keys
-func (t *Token) hmacSignatureForVerification(hash crypto.Hash, key any) ([]byte, error) {
-	var secretKey []byte
-
-	// If the key is a string, convert it to a byte slice.
-	switch keyTyped := key.(type) {
-	case []byte:
-		secretKey = keyTyped
-	case string:
-		secretKey = []byte(keyTyped)
-	default:
-		return nil, fmt.Errorf("secret key is %T, not a byte slice or string", key)
-	}
-
-	// Ensure the secret key is not empty.
-	if len(secretKey) == 0 {
-		return nil, fmt.Errorf("no secret key provided, cannot complete operation")
-	}
-
-	// Note: Skip key size validation for verification to maintain compatibility with legacy tokens
-
-	// Ensure the hash is available.
-	if !hash.Available() {
-		return nil, fmt.Errorf("requested hash is not available")
-	}
-
-	var data string
-
-	if parts := strings.Split(t.raw, dot); len(parts) >= 2 {
-		data = strings.Join(parts[0:2], dot)
-	} else {
-		str, err := t.Header.Base64URLString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate header string: %w", err)
-		}
-
-		str2, err := t.Claims.Base64URLString()
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate claims string: %w", err)
-		}
-
-		data = str + dot + str2
-	}
-
-	mac := hmac.New(hash.New, secretKey)
-	mac.Write([]byte(data))
-
-	sig := mac.Sum(nil)
-
-	return sig, nil
+	// Use JWS for the actual signing operation with advanced validation
+	return jwsToken.SignHMAC(hash, key, signingInput)
 }
 
 // VerifyHMACSignature verifies the HMAC signature of the token using the
 // given hash and key.
 func (t *Token) VerifyHMACSignature(hash crypto.Hash, key any) error {
-	// Use the verification-specific method that doesn't validate key size
-	sig, err := t.hmacSignatureForVerification(hash, key)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return fmt.Errorf("failed to generate HMAC signature: %w", err)
+		return fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	// Compare the signature to the token's signature.
-	if !hmac.Equal(t.Signature, sig) {
-		return fmt.Errorf("invalid HMAC signature")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	return nil
-}
-
-// validateRSAKeySize validates that the RSA key meets the minimum size requirement per RFC 7518.
-// RSA keys must be at least 2048 bits (256 bytes) for RSA-based JWT algorithms.
-func validateRSAKeySize(key any) error {
-	const minKeySize = 2048                // bits
-	const minKeySizeBytes = minKeySize / 8 // 256 bytes
-
-	var keySize int
-	switch rsaKey := key.(type) {
-	case *rsa.PublicKey:
-		keySize = rsaKey.Size()
-	case *rsa.PrivateKey:
-		keySize = rsaKey.Size()
-	default:
-		return fmt.Errorf("invalid RSA key type: %T", key)
-	}
-
-	if keySize < minKeySizeBytes {
-		return fmt.Errorf("RSA key size %d bytes (%d bits) is below minimum required %d bytes (%d bits) per RFC 7518",
-			keySize, keySize*8, minKeySizeBytes, minKeySize)
-	}
-
-	return nil
+	// Use JWS for the actual verification operation (without key size validation for compatibility)
+	return jwsToken.VerifyHMACForLegacy(hash, key, signingInput)
 }
 
 // VerifyRSASignature verifies the RSA signature of the token using the
 // given hash and public key.
 func (t *Token) VerifyRSASignature(hash crypto.Hash, publicKey *rsa.PublicKey) error {
-	if !hash.Available() {
-		return fmt.Errorf("requested hash is not available")
-	}
-
-	if publicKey == nil {
-		return fmt.Errorf("no RSA public key")
-	}
-
-	// Validate RSA key size per RFC 7518
-	if err := validateRSAKeySize(publicKey); err != nil {
-		return fmt.Errorf("RSA key validation failed: %w", err)
-	}
-
-	parts, err := splitToken(t.raw)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return fmt.Errorf("failed to split token: %w", err)
+		return fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	data := strings.Join(parts[0:2], dot)
-
-	h := hash.New()
-	h.Write([]byte(data))
-
-	err = rsa.VerifyPKCS1v15(publicKey, hash, h.Sum(nil), t.Signature)
+	// Get the signing input
+	signingInput, err := t.signingInput()
 	if err != nil {
-		return fmt.Errorf("failed to verify RSA signature: %w", err)
+		return fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	return nil
+	// Use JWS for the actual verification operation with advanced validation
+	return jwsToken.VerifyRSA(hash, publicKey, signingInput)
 }
 
 // RSASignature returns the RSA signature of the token using the
 // given hash and private key.
 func (t *Token) RSASignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]byte, error) {
-	if !hash.Available() {
-		return nil, fmt.Errorf("requested hash is not available")
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	if privateKey == nil {
-		return nil, fmt.Errorf("no RSA private key")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	// Validate RSA key size per RFC 7518
-	if err := validateRSAKeySize(privateKey); err != nil {
-		return nil, fmt.Errorf("RSA key validation failed: %w", err)
-	}
-
-	if len(t.raw) == 0 {
-		t.raw = t.String()
-	}
-
-	parts := strings.Split(t.raw, dot)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
-	}
-
-	data := strings.Join(parts[0:2], dot)
-
-	h := hash.New()
-	h.Write([]byte(data))
-
-	return rsa.SignPKCS1v15(rand.Reader, privateKey, hash, h.Sum(nil))
+	// Use JWS for the actual signing operation with advanced validation
+	return jwsToken.SignRSA(hash, privateKey, signingInput)
 }
 
 // RSAPSSSignature returns the RSA-PSS signature of the token using the given hash
@@ -934,33 +791,20 @@ func (t *Token) RSASignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]by
 // This is similar to RSASignature, but uses the RSA-PSS algorithm, which
 // is probabilistic, and therefore, the signature will be different each time.
 func (t *Token) RSAPSSSignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([]byte, error) {
-	if !hash.Available() {
-		return nil, fmt.Errorf("requested hash is not available")
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	if privateKey == nil {
-		return nil, fmt.Errorf("no RSA private key")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	// Validate RSA key size per RFC 7518
-	if err := validateRSAKeySize(privateKey); err != nil {
-		return nil, fmt.Errorf("RSA key validation failed: %w", err)
-	}
-
-	if len(t.raw) == 0 {
-		t.raw = t.String()
-	}
-
-	parts := strings.Split(t.raw, dot)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
-	}
-
-	data := strings.Join(parts[0:2], dot)
-	h := hash.New()
-	h.Write([]byte(data))
-
-	return rsa.SignPSS(rand.Reader, privateKey, hash, h.Sum(nil), nil)
+	// Use JWS for the actual signing operation with advanced validation
+	return jwsToken.SignRSAPSS(hash, privateKey, signingInput)
 }
 
 // VerifyRSAPSSSignature verifies the RSA-PSS signature of the token using the
@@ -969,198 +813,96 @@ func (t *Token) RSAPSSSignature(hash crypto.Hash, privateKey *rsa.PrivateKey) ([
 // This is similar to VerifyRSASignature, but uses the RSA-PSS algorithm, which
 // is probabilistic, and therefore, the signature will be different each time.
 func (t *Token) VerifyRSAPSSSignature(hash crypto.Hash, publicKey *rsa.PublicKey) error {
-	if !hash.Available() {
-		return fmt.Errorf("requested hash is not available")
-	}
-
-	if publicKey == nil {
-		return fmt.Errorf("no RSA public key")
-	}
-
-	// Validate RSA key size per RFC 7518
-	if err := validateRSAKeySize(publicKey); err != nil {
-		return fmt.Errorf("RSA key validation failed: %w", err)
-	}
-
-	parts, err := splitToken(t.raw)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return fmt.Errorf("failed to split token: %w", err)
+		return fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	data := strings.Join(parts[0:2], dot)
-	h := hash.New()
-	h.Write([]byte(data))
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return fmt.Errorf("failed to create signing input: %w", err)
+	}
 
-	return rsa.VerifyPSS(publicKey, hash, h.Sum(nil), t.Signature, nil)
+	// Use JWS for the actual verification operation with advanced validation
+	return jwsToken.VerifyRSAPSS(hash, publicKey, signingInput)
 }
 
 // VerifyECDSASignature verifies the ECDSA signature of the token using the
 // given hash and public key.
 func (t *Token) VerifyECDSASignature(hash crypto.Hash, publicKey *ecdsa.PublicKey) error {
-	if !hash.Available() {
-		return fmt.Errorf("requested hash is not available")
-	}
-
-	if publicKey == nil {
-		return fmt.Errorf("no ECDSA public key")
-	}
-
-	parts, err := splitToken(t.raw)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return fmt.Errorf("failed to split token: %w", err)
+		return fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	sig := t.Signature
-
-	data := strings.Join(parts[0:2], dot)
-
-	var keySize int
-
-	switch hash {
-	case crypto.SHA256:
-		keySize = 32
-	case crypto.SHA512:
-		keySize = 66
-	default:
-		return fmt.Errorf("invalid hash: %T", hash)
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	h := hash.New()
-	h.Write([]byte(data))
-
-	if len(sig) != 2*keySize {
-		return fmt.Errorf("invalid signature length for key size")
-	}
-
-	r := big.NewInt(0).SetBytes(sig[:keySize])
-	s := big.NewInt(0).SetBytes(sig[keySize:])
-
-	verified := ecdsa.Verify(publicKey, h.Sum(nil), r, s)
-	if !verified {
-		return fmt.Errorf("failed to validate ECDSA signature")
-	}
-
-	return nil
+	// Use JWS for the actual verification operation with advanced validation
+	return jwsToken.VerifyECDSA(hash, publicKey, signingInput)
 }
 
 // ECDSASignature returns the ECDSA signature of the token using the
 // given hash and private key.
 func (t *Token) ECDSASignature(hash crypto.Hash, privateKey *ecdsa.PrivateKey) ([]byte, error) {
-	if !hash.Available() {
-		return nil, fmt.Errorf("requested hash %T is not available", hash)
-	}
-
-	if privateKey == nil {
-		return nil, fmt.Errorf("no ECDSA private key")
-	}
-
-	if len(t.raw) == 0 {
-		t.raw = t.String()
-	}
-
-	parts := strings.Split(t.raw, dot)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
-	}
-
-	data := strings.Join(parts[0:2], dot)
-
-	h := hash.New()
-	h.Write([]byte(data))
-
-	var curveBits int
-
-	switch hash {
-	case crypto.SHA256:
-		curveBits = 256
-	case crypto.SHA384:
-		curveBits = 384
-	case crypto.SHA512:
-		curveBits = 512
-	default:
-		return nil, fmt.Errorf("invalid hash %T requested", hash)
-	}
-
-	r, s, err := ecdsa.Sign(rand.Reader, privateKey, h.Sum(nil))
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign with ECDSA private key: %w", err)
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	keyCurveBits := privateKey.Curve.Params().BitSize
-
-	if keyCurveBits != curveBits {
-		return nil, fmt.Errorf("invalid ECDSA key, curve bits does not match requested hash")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	keyBytes := curveBits / 8
-	if curveBits%8 > 0 {
-		keyBytes += 1
-	}
-
-	rBytes := r.Bytes()
-	rBytesPadded := make([]byte, keyBytes)
-	copy(rBytesPadded[keyBytes-len(rBytes):], rBytes)
-
-	sBytes := s.Bytes()
-	sBytesPadded := make([]byte, keyBytes)
-	copy(sBytesPadded[keyBytes-len(sBytes):], sBytes)
-
-	out := append(rBytesPadded, sBytesPadded...)
-
-	return out, nil
+	// Use JWS for the actual signing operation with advanced validation
+	return jwsToken.SignECDSA(hash, privateKey, signingInput)
 }
 
 // VerifyEdDSASignature verifies the EdDSA signature of the token using the
 // given public key.
 func (t *Token) VerifyEdDSASignature(publicKey ed25519.PublicKey) error {
-	if len(publicKey) == 0 {
-		return fmt.Errorf("no EdDSA public key")
-	}
-
-	if len(publicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid private EdDSA public key size")
-	}
-
-	parts, err := splitToken(t.raw)
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
 	if err != nil {
-		return fmt.Errorf("failed to split token: %w", err)
+		return fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	sig := t.Signature
-
-	data := strings.Join(parts[0:2], dot)
-
-	verified := ed25519.Verify(publicKey, []byte(data), sig)
-	if !verified {
-		return fmt.Errorf("failed to validate ECDSA signature")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	return nil
+	// Use JWS for the actual verification operation with advanced validation
+	return jwsToken.VerifyEdDSA(publicKey, signingInput)
 }
 
 // EdDSASignature returns the EdDSA signature of the token using the
 // given private key.
 func (t *Token) EdDSASignature(privateKey ed25519.PrivateKey) ([]byte, error) {
-	if len(privateKey) == 0 {
-		return nil, fmt.Errorf("no EdDSA private key")
+	// Create a JWS signature instance for cryptographic operations
+	jwsToken, err := t.asJWS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
 	}
 
-	if len(privateKey) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("invalid private EdDSA private key size")
+	// Get the signing input
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	if len(t.raw) == 0 {
-		t.raw = t.String()
-	}
-
-	parts := strings.Split(t.raw, dot)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("incorrect number of JWT parts: %d", len(parts))
-	}
-
-	data := strings.Join(parts[0:2], dot)
-
-	return ed25519.Sign(privateKey, []byte(data)), nil
+	// Use JWS for the actual signing operation with advanced validation
+	return jwsToken.SignEdDSA(privateKey, signingInput)
 }
 
 // Sign returns the signature of the token using the given options.
@@ -1365,15 +1107,27 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		}
 	}
 
+	// Handle "none" algorithm security: remove it from allowed algorithms
+	// if InsecureAllowNone is false, regardless of whether it was in the list
+	if !config.InsecureAllowNone {
+		var filteredAlgs []jwa.Algorithm
+		for _, alg := range config.AllowedAlgorithms {
+			if alg != jwa.None {
+				filteredAlgs = append(filteredAlgs, alg)
+			}
+		}
+		config.AllowedAlgorithms = filteredAlgs
+	}
+
 	// Verify the signature of the token, which may be "none" if the
-	// explictly allowed "none" algorithm is set in the config.
+	// explicitly allowed "none" algorithm is set in the config.
 	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys)
 	if err != nil {
 		return fmt.Errorf("failed to validate token signature: %w", err)
 	}
 
 	// Validate critical headers per RFC 7515 section 4.1.11
-	err = t.validateCriticalHeaders(config.SupportedCriticalHeaders)
+	err = t.Header.ValidateCriticalHeaders(config.SupportedCriticalHeaders)
 	if err != nil {
 		return fmt.Errorf("failed to validate critical headers: %w", err)
 	}
@@ -1382,10 +1136,16 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	//
 	// Otherwise, the issuer must be in the allowed issuers map.
 	if config.AllowedIssuers != nil {
-		issuer := fmt.Sprintf("%s", t.Claims[Issuer])
-
-		if !slices.Contains(config.AllowedIssuers, issuer) {
-			return fmt.Errorf("requested issuer %q is not allowed", issuer)
+		issuer, ok := t.Claims[Issuer]
+		if !ok {
+			return fmt.Errorf("missing %q claim in token", Issuer)
+		}
+		issuerStr, ok := issuer.(string)
+		if !ok {
+			return fmt.Errorf("invalid issuer type %T in token claims", issuer)
+		}
+		if !slices.Contains(config.AllowedIssuers, issuerStr) {
+			return fmt.Errorf("requested issuer %q is not allowed", issuerStr)
 		}
 	}
 
@@ -1393,7 +1153,12 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	//
 	// Otherwise, the audience must be in the allowed audiences map.
 	if config.AllowedAudiences != nil {
-		switch aud := t.Claims[Audience].(type) {
+		// Check if the Audience claim exists in the token
+		aud, ok := t.Claims[Audience]
+		if !ok {
+			return fmt.Errorf("missing %q claim in token", Audience)
+		}
+		switch aud := aud.(type) {
 		case string:
 			// If the audience is a string, then we need to check if the audience
 			// is in the allowed audiences.
@@ -1420,20 +1185,26 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		}
 	}
 
+	// Verify expiration time (exp) claim per RFC 7519 Section 4.1.4
 	expired, err := t.Expired(config.Clock)
 	if err != nil {
 		return fmt.Errorf("failed to validate token expiration: %w", err)
 	}
 
 	if expired {
-		// Apply clock skew tolerance for expiration
+		// Apply clock skew tolerance for expiration if configured
 		if config.ClockSkewTolerance > 0 {
 			if expValue, ok := t.Claims[ExpirationTime]; ok {
 				if expInt, ok := expValue.(int64); ok {
 					exp := time.Unix(expInt, 0)
+					// Token is only truly expired if current time exceeds exp + tolerance
 					if config.Clock().After(exp.Add(config.ClockSkewTolerance)) {
-						return fmt.Errorf("token is expired")
+						return fmt.Errorf("token is expired (exp: %v, now: %v, tolerance: %v)",
+							exp.UTC(), config.Clock().UTC(), config.ClockSkewTolerance)
 					}
+					// Token is within tolerance, continue verification
+				} else {
+					return fmt.Errorf("token is expired")
 				}
 			} else {
 				return fmt.Errorf("token is expired")
@@ -1443,10 +1214,11 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 		}
 	}
 
+	// Verify not before (nbf) claim per RFC 7519 Section 4.1.5
 	if notBeforeValue, ok := t.Claims[NotBefore]; ok {
 		if notBeforeInt, ok := notBeforeValue.(int64); ok {
 			notBefore := time.Unix(notBeforeInt, 0)
-			// Apply clock skew tolerance for "not before"
+			// Apply clock skew tolerance for "not before" - subtract tolerance from nbf
 			adjustedNotBefore := notBefore
 			if config.ClockSkewTolerance > 0 {
 				adjustedNotBefore = notBefore.Add(-config.ClockSkewTolerance)
@@ -1462,11 +1234,64 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	return nil
 }
 
+// asJWS creates a JWS Signature instance from this JWT Token for cryptographic operations.
+// This allows JWT to leverage the advanced signing and verification logic without
+// duplicating the logic for the Token type.
+func (t *Token) asJWS() (*jws.Signature, error) {
+	claimsBytes, err := json.Marshal(t.Claims)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal claims: %w", err)
+	}
+
+	return &jws.Signature{
+		Header:    jws.Header(t.Header),
+		Payload:   claimsBytes,
+		Signature: t.Signature,
+	}, nil
+}
+
+// signingInput returns the JWT signing input compatible with JWS.
+func (t *Token) signingInput() (string, error) {
+	// If we have the original raw token, use its parts for exact reproduction
+	if t.raw != "" {
+		parts := strings.Split(t.raw, dot)
+		if len(parts) >= 2 {
+			return strings.Join(parts[0:2], dot), nil
+		}
+	}
+
+	// Fallback: Marshal header and claims directly to avoid newlines
+	headerBytes, err := json.Marshal(t.Header)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal header: %w", err)
+	}
+
+	headerStr, err := base64.Encode(headerBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode header: %w", err)
+	}
+
+	claimsBytes, err := json.Marshal(t.Claims)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal claims: %w", err)
+	}
+
+	claimsStr, err := base64.Encode(claimsBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode claims: %w", err)
+	}
+
+	return headerStr + dot + claimsStr, nil
+}
+
 // splitToken splits a JWT into its three parts, returning an error if the
-// token is not in the correct format.
+// token is not in the correct format. This implements the parsing step
+// from RFC 7519 Section 7.2.
 func splitToken(token string) ([3]string, error) {
 	var parts [3]string
 	var i, j int
+
+	// Split into exactly 3 parts
 	for k := 0; k < 2; k++ {
 		j = strings.IndexByte(token[i:], '.') + i
 		if j < i {
@@ -1476,6 +1301,7 @@ func splitToken(token string) ([3]string, error) {
 		i = j + 1
 	}
 	parts[2] = token[i:]
+
 	return parts, nil
 }
 
@@ -1544,30 +1370,26 @@ func WithContext(ctx context.Context, token *Token) context.Context {
 	return context.WithValue(ctx, ContextKey, token)
 }
 
-// validateJWTStructure performs RFC 7519 compliant validation of JWT structure
+// validateJWTStructure performs RFC 7519 Section 7.2 compliant validation of JWT structure
 // before attempting to parse individual components.
 func validateJWTStructure(input string) error {
-	// Additional basic structural validation
 	if len(input) == 0 {
 		return fmt.Errorf("jwt: incorrect number of JWT parts")
 	}
 
-	return nil
-}
-
-// validateBase64URLString checks if a string contains only valid base64url characters
-// according to RFC 4648 Section 5, which is referenced by JWT specifications.
-func validateBase64URLString(s string) error {
-	// Base64url alphabet: A-Z, a-z, 0-9, -, _
-	// Padding with '=' is allowed but not required in base64url
-	for _, char := range s {
-		if !((char >= 'A' && char <= 'Z') ||
-			(char >= 'a' && char <= 'z') ||
-			(char >= '0' && char <= '9') ||
-			char == '-' || char == '_' || char == '=') {
-			return fmt.Errorf("jwt: invalid base64url character: %c", char)
+	// Count the number of dots - need at least 2 for valid JWT structure
+	// Note: extra dots are treated as part of the signature and will fail later during base64 decoding
+	dotCount := 0
+	for _, char := range input {
+		if char == '.' {
+			dotCount++
 		}
 	}
+
+	if dotCount < 2 {
+		return fmt.Errorf("jwt: incorrect number of JWT parts")
+	}
+
 	return nil
 }
 
@@ -1584,8 +1406,17 @@ func (t *Token) verifyHMACSignatureWithKeys(hash crypto.Hash, keyID string, allo
 	// When no specific key ID, try all keys but don't leak timing information
 	var lastErr error
 	validKeyFound := false
+	keyCount := 0
 
 	for _, key := range allowedKeys {
+		// Count all keys that could potentially be HMAC keys
+		switch key.(type) {
+		case []byte, string:
+			keyCount++
+		default:
+			continue // Skip non-HMAC compatible keys
+		}
+
 		err := t.VerifyHMACSignature(hash, key)
 		if err == nil {
 			validKeyFound = true
@@ -1597,6 +1428,10 @@ func (t *Token) verifyHMACSignatureWithKeys(hash crypto.Hash, keyID string, allo
 
 	if validKeyFound {
 		return nil
+	}
+
+	if keyCount == 0 {
+		return fmt.Errorf("failed to verify HMAC signature using any of the allowed keys")
 	}
 
 	if lastErr != nil {
@@ -1650,6 +1485,10 @@ func (t *Token) verifyRSASignatureWithKeys(hash crypto.Hash, keyID string, allow
 		return keyValidationErrors[0]
 	}
 
+	if keyCount == 0 {
+		return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
+	}
+
 	return fmt.Errorf("failed to verify RSA signature using any of the allowed keys")
 }
 
@@ -1698,10 +1537,15 @@ func (t *Token) verifyRSAPSSSignatureWithKeys(hash crypto.Hash, keyID string, al
 		return keyValidationErrors[0]
 	}
 
+	if keyCount == 0 {
+		return fmt.Errorf("failed to verify RSA-PSS signature using any of the allowed keys")
+	}
+
 	return fmt.Errorf("failed to verify RSA-PSS signature using any of the allowed keys")
 }
 
 // verifyECDSASignatureWithKeys verifies ECDSA signature using the provided keys.
+// This method ensures consistent timing behavior to prevent information leakage.
 func (t *Token) verifyECDSASignatureWithKeys(hash crypto.Hash, keyID string, allowedKeys map[string]any) error {
 	if keyID != "" {
 		if key, ok := allowedKeys[keyID]; ok {
@@ -1714,20 +1558,43 @@ func (t *Token) verifyECDSASignatureWithKeys(hash crypto.Hash, keyID string, all
 		return fmt.Errorf("failed to verify ECDSA signature using key %q", keyID)
 	}
 
+	// When no specific key ID, try all keys with consistent timing
+	var lastErr error
+	validKeyFound := false
+	keyCount := 0
+
 	for _, key := range allowedKeys {
 		publicKey, ok := key.(*ecdsa.PublicKey)
 		if !ok {
 			continue // Skip non-ECDSA keys
 		}
+		keyCount++
+
 		err := t.VerifyECDSASignature(hash, publicKey)
 		if err == nil {
-			return nil
+			validKeyFound = true
+			// Continue testing all keys to prevent timing attacks
+		} else {
+			lastErr = err
 		}
+	}
+
+	if validKeyFound {
+		return nil
+	}
+
+	if keyCount == 0 {
+		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys: %w", lastErr)
 	}
 	return fmt.Errorf("failed to verify ECDSA signature using any of the allowed keys")
 }
 
 // verifyEdDSASignatureWithKeys verifies EdDSA signature using the provided keys.
+// This method ensures consistent timing behavior to prevent information leakage.
 func (t *Token) verifyEdDSASignatureWithKeys(keyID string, allowedKeys map[string]any) error {
 	if keyID != "" {
 		if key, ok := allowedKeys[keyID]; ok {
@@ -1740,84 +1607,37 @@ func (t *Token) verifyEdDSASignatureWithKeys(keyID string, allowedKeys map[strin
 		return fmt.Errorf("failed to verify EdDSA signature using key %q", keyID)
 	}
 
+	// When no specific key ID, try all keys with consistent timing
+	var lastErr error
+	validKeyFound := false
+	keyCount := 0
+
 	for _, key := range allowedKeys {
 		publicKey, ok := key.(ed25519.PublicKey)
 		if !ok {
 			continue // Skip non-EdDSA keys
 		}
+		keyCount++
+
 		err := t.VerifyEdDSASignature(publicKey)
 		if err == nil {
-			return nil
+			validKeyFound = true
+			// Continue testing all keys to prevent timing attacks
+		} else {
+			lastErr = err
 		}
 	}
-	return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
-}
 
-// validateCriticalHeaders validates critical headers per RFC 7515 section 4.1.11.
-// If a "crit" header is present, it must contain only extension header parameter names
-// that this application understands and can process.
-func (t *Token) validateCriticalHeaders(supportedCriticalHeaders []string) error {
-	// Check if the token has a "crit" (critical) header parameter
-	critValue, err := t.Header.Get(header.Critical)
-	if err != nil {
-		// If there's no "crit" header, validation passes
+	if validKeyFound {
 		return nil
 	}
 
-	// The "crit" header must be an array of strings
-	critArray, ok := critValue.([]any)
-	if !ok {
-		return fmt.Errorf("critical header parameter \"crit\" must be an array")
+	if keyCount == 0 {
+		return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
 	}
 
-	// RFC 7515 section 4.1.11: The "crit" header parameter MUST NOT be empty
-	if len(critArray) == 0 {
-		return fmt.Errorf("critical header parameter \"crit\" must not be empty")
+	if lastErr != nil {
+		return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys: %w", lastErr)
 	}
-
-	// Convert to string slice and validate each critical header
-	critHeaders := make([]string, len(critArray))
-	for i, v := range critArray {
-		critHeader, ok := v.(string)
-		if !ok {
-			return fmt.Errorf("critical header parameter names must be strings")
-		}
-		critHeaders[i] = critHeader
-	}
-
-	// RFC 7515 section 4.1.11: The "crit" header parameter MUST NOT include
-	// any header parameter names that are defined by RFC 7515
-	standardHeaders := []string{
-		header.Algorithm,
-		header.JWKSetURL,
-		header.JSONWebKey,
-		header.KeyID,
-		header.X509URL,
-		header.X509CertificateChain,
-		header.X509CertificateSHA1Thumbprint,
-		header.X509CertificateSHA256Thumbprint,
-		header.Type,
-		header.ContentType,
-		header.Critical,
-	}
-	for _, critHeader := range critHeaders {
-		if slices.Contains(standardHeaders, critHeader) {
-			return fmt.Errorf("critical header parameter %q is a standard header and cannot be marked as critical", critHeader)
-		}
-	}
-
-	// Now validate each critical header parameter
-	for _, critHeader := range critHeaders {
-		// RFC 7515 section 4.1.11: Critical header parameter names MUST be understood
-		if !slices.Contains(supportedCriticalHeaders, critHeader) {
-			return fmt.Errorf("unsupported critical header parameter: %q", critHeader)
-		}
-
-		// Verify that the critical header parameter is actually present in the header
-		if !t.Header.Has(critHeader) {
-			return fmt.Errorf("critical header parameter %q is missing from header", critHeader)
-		}
-	}
-
-	return nil
+	return fmt.Errorf("failed to verify EdDSA signature using any of the allowed keys")
 }

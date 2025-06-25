@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/jwa"
@@ -19,6 +20,9 @@ var (
 
 	// ErrFailedToEncodeHeader is returned when the header fails to be encoded.
 	ErrFailedToEncodeHeader = errors.New("header: failed to base64 URL encode")
+
+	// ErrCriticalHeaderValidation is returned when critical header validation fails.
+	ErrCriticalHeaderValidation = errors.New("header: critical header validation failed")
 )
 
 // ParameterName is one of three types: registered, public, or private.
@@ -207,8 +211,6 @@ func (h Parameters) AsymetricAlgorithm() (bool, error) {
 	}
 
 	switch jwa.Algorithm(alg) {
-	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return false, nil
 	case jwa.PS256, jwa.PS384, jwa.PS512:
 		return true, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512:
@@ -237,4 +239,100 @@ func (h Parameters) Get(param ParameterName) (any, error) {
 func (h Parameters) Has(param ParameterName) bool {
 	_, ok := h[param]
 	return ok
+}
+
+// StandardParameters returns a slice of all standard JOSE header parameter names
+// as defined by RFC 7515 (JWS) and RFC 7516 (JWE).
+//
+// Per RFC 7515 Section 4.1.11, these parameters MUST NOT be included in the
+// "crit" (Critical) header parameter list.
+func StandardParameters() []string {
+	return []string{
+		Algorithm,
+		JWKSetURL,
+		JSONWebKey,
+		KeyID,
+		X509URL,
+		X509CertificateChain,
+		X509CertificateSHA1Thumbprint,
+		X509CertificateSHA256Thumbprint,
+		Type,
+		ContentType,
+		Critical,
+		Encryption, // JWE specific
+		Zip,        // JWE specific
+	}
+}
+
+// IsStandardParameter returns true if the parameter name is defined as a standard
+// parameter by RFC 7515 (JWS) or RFC 7516 (JWE).
+func IsStandardParameter(name string) bool {
+	standardParams := StandardParameters()
+	return slices.Contains(standardParams, name)
+}
+
+// ValidateCriticalHeaders validates critical headers per RFC 7515 section 4.1.11.
+// If a "crit" header is present, it must contain only extension header parameter names
+// that the application understands and can process.
+//
+// This function implements the complete RFC 7515 critical header validation:
+// 1. Validates "crit" is an array of strings
+// 2. Ensures the array is not empty
+// 3. Checks no standard parameters are marked as critical
+// 4. Verifies all critical parameters are present in the header
+// 5. Validates all critical parameters are supported by the application
+func (h Parameters) ValidateCriticalHeaders(supportedCriticalHeaders []string) error {
+	// Check if the header has a "crit" (critical) parameter
+	critValue, err := h.Get(Critical)
+	if err != nil {
+		// If there's no "crit" header, validation passes
+		if errors.Is(err, ErrParameterNotFound) {
+			return nil
+		}
+		return fmt.Errorf("failed to get critical parameter: %w", err)
+	}
+
+	// The "crit" header must be an array of strings
+	critArray, ok := critValue.([]any)
+	if !ok {
+		return fmt.Errorf("critical header parameter \"crit\" must be an array")
+	}
+
+	// RFC 7515 section 4.1.11: The "crit" header parameter MUST NOT be empty
+	if len(critArray) == 0 {
+		return fmt.Errorf("critical header parameter \"crit\" must not be empty")
+	}
+
+	// Convert to string slice and validate each critical header
+	critHeaders := make([]string, len(critArray))
+	for i, v := range critArray {
+		critHeader, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("critical header parameter names must be strings")
+		}
+		critHeaders[i] = critHeader
+	}
+
+	// RFC 7515 section 4.1.11: The "crit" header parameter MUST NOT include
+	// any header parameter names that are defined by RFC 7515 or RFC 7516
+	for _, critHeader := range critHeaders {
+		if IsStandardParameter(critHeader) {
+			return fmt.Errorf("critical header parameter %q is a standard header and cannot be marked as critical", critHeader)
+		}
+	}
+
+	// Validate each critical header parameter
+	for _, critHeader := range critHeaders {
+		// RFC 7515 section 4.1.11: Critical header parameter names MUST be understood
+		if supportedCriticalHeaders != nil && !slices.Contains(supportedCriticalHeaders, critHeader) {
+			return fmt.Errorf("unsupported critical header parameter: %q", critHeader)
+		}
+
+		// Verify that the critical header parameter is actually present in the header
+		if !h.Has(critHeader) {
+			return fmt.Errorf("critical header parameter %q is missing from header", critHeader)
+		}
+	}
+
+	return nil
 }
