@@ -4,6 +4,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"errors"
+	"fmt"
+	"slices"
+)
+
+var (
+	// ErrUnknownAlgorithm is returned when an algorithm is not recognized or supported.
+	ErrUnknownAlgorithm = errors.New("jwa: unknown algorithm")
+
+	// ErrAlgorithmNotAllowed is returned when an algorithm is known but not permitted
+	// in the current context (e.g., not in the allowed algorithms list).
+	ErrAlgorithmNotAllowed = errors.New("jwa: algorithm not allowed")
 )
 
 // PrivateKey is a type that can be used to sign JOSE objects (JWS, JWT),
@@ -132,3 +144,29 @@ const EdDSA Algorithm = "EdDSA"
 // https://datatracker.ietf.org/doc/html/draft-jones-webauthn-secp256k1
 // https://datatracker.ietf.org/doc/html/draft-ietf-cose-webauthn-algorithms-04#section-3.2
 const ES256K Algorithm = "ES256K"
+
+// knownAlgorithms is a slice of algorithms that are recognized and supported
+// by this library. This is used for algorithm validation to prevent
+// algorithm confusion attacks. Note that "none" is included as a known
+// algorithm but provides no cryptographic protection.
+var knownAlgorithms = []Algorithm{
+	HS256, HS384, HS512,
+	RS256, RS384, RS512,
+	PS256, PS384, PS512,
+	ES256, ES384, ES512,
+	EdDSA, None,
+}
+
+// ValidateAlgorithm checks if an algorithm is known/supported and that
+// it is included in the allowed algorithms list.
+func ValidateAlgorithm(alg Algorithm, allowedAlgs []Algorithm) error {
+	if !slices.Contains(knownAlgorithms, alg) {
+		return fmt.Errorf("%w: %q is not a known algorithm", ErrUnknownAlgorithm, alg)
+	}
+
+	if !slices.Contains(allowedAlgs, alg) {
+		return fmt.Errorf("%w: %q is not allowed", ErrAlgorithmNotAllowed, alg)
+	}
+
+	return nil
+}

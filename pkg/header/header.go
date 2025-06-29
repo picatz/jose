@@ -1,13 +1,10 @@
 package header
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/jwa"
 )
 
@@ -144,44 +141,15 @@ const (
 // https://datatracker.ietf.org/doc/html/rfc7515#section-2
 type Parameters map[ParameterName]any
 
-// Base64URLString returns the JOSE header as a base64 URL encoded string
-// suitable for use in a JWS or JWE.
-func (h Parameters) Base64URLString() (string, error) {
-	buff := bytes.NewBuffer(nil)
-	err := json.NewEncoder(buff).Encode(h)
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrFailedToEncodeHeader, err)
-	}
-	return base64.Encode(buff.Bytes())
-}
-
 // Type returns the media type of this complete JOSE object (JWS or JWE).
 func (h Parameters) Type() (string, error) {
-	value, ok := h[Type]
-	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, Type)
-	}
-	strValue, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("%w: %q: is type %T, not string", ErrInvalidParameterType, Type, value)
-	}
-	return strValue, nil
+	return Get[string](h, Type)
 }
 
 // Algorithm returns the algorithm intended for use with the JWS or JWE;
 // the algorithm used to digitally sign the JWS or encrypt the JWE.
 func (h Parameters) Algorithm() (jwa.Algorithm, error) {
-	value, ok := h[Algorithm]
-	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, Algorithm)
-	}
-
-	alg, ok := value.(jwa.Algorithm)
-	if ok {
-		return alg, nil
-	}
-
-	return "", fmt.Errorf("%w: %q: is type %T, not algorithm", ErrInvalidParameterType, Algorithm, value)
+	return Get[jwa.Algorithm](h, Algorithm)
 }
 
 // SymetricAlgorithm returns the symetric algorithm used in the header,
@@ -228,11 +196,23 @@ func (h Parameters) AsymetricAlgorithm() (bool, error) {
 // without having to check if the paramater exists in the header first. This function will
 // return an error if the paramater does not exist in the header.
 func (h Parameters) Get(param ParameterName) (any, error) {
+	return Get[any](h, param)
+}
+
+func Get[T any](h Parameters, param ParameterName) (T, error) {
+	var zero T
+
 	value, ok := h[param]
 	if !ok {
-		return "", fmt.Errorf("%w: %q", ErrParameterNotFound, param)
+		return zero, fmt.Errorf("%w: %q", ErrParameterNotFound, param)
 	}
-	return value, nil
+
+	typedValue, ok := value.(T)
+	if !ok {
+		return zero, fmt.Errorf("%w: %q: is type %T, not %T", ErrInvalidParameterType, param, value, zero)
+	}
+
+	return typedValue, nil
 }
 
 // Has returns true if the given parameter name exists in the set of JOSE header parameters.

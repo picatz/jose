@@ -1,6 +1,7 @@
 package jwt_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -31,25 +32,25 @@ func TestRFC7519Compliance(t *testing.T) {
 				name:        "No periods - invalid JWT structure",
 				input:       "invalidjwtnoperiods",
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "incorrect number of JWT parts") },
+				errorCheck:  func(err error) bool { return errors.Is(err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "One period only - invalid JWT structure",
 				input:       "header.payload",
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "incorrect number of JWT parts") },
+				errorCheck:  func(err error) bool { return errors.Is(err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "Empty string - invalid JWT",
 				input:       "",
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "incorrect number of JWT parts") },
+				errorCheck:  func(err error) bool { return errors.Is(err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "Too many periods - extra content treated as part of signature",
 				input:       "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ0ZXN0In0.extra.periods.here",
 				shouldError: true, // This should fail because "extra.periods.here" is not valid base64
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "failed to decode signature base64") },
+				errorCheck:  func(err error) bool { return errors.Is(err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "Empty header - decodes to empty JSON",
@@ -231,19 +232,19 @@ func TestSecurityEdgeCases(t *testing.T) {
 			name        string
 			headerJson  string
 			shouldError bool
-			errorCheck  func(error) bool
+			errorCheck  func(*testing.T, error)
 		}{
 			{
 				name:        "Missing algorithm header",
 				headerJson:  `{"typ":"JWT"}`,
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "parameter not found") },
+				errorCheck:  func(t *testing.T, err error) { require.ErrorIs(t, err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "Null algorithm header",
 				headerJson:  `{"alg":null,"typ":"JWT"}`,
 				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "is not allowed") },
+				errorCheck:  func(t *testing.T, err error) { require.ErrorIs(t, err, jwt.ErrInvalidToken) },
 			},
 			{
 				name:        "Case sensitivity in algorithm",
@@ -262,7 +263,7 @@ func TestSecurityEdgeCases(t *testing.T) {
 
 				token, parseErr := jwt.ParseString(jwtString)
 				if parseErr != nil && tt.shouldError && tt.errorCheck != nil {
-					require.True(t, tt.errorCheck(parseErr))
+					tt.errorCheck(t, parseErr)
 					return
 				}
 				require.NoError(t, parseErr)
@@ -277,7 +278,7 @@ func TestSecurityEdgeCases(t *testing.T) {
 				if tt.shouldError {
 					require.Error(t, err)
 					if tt.errorCheck != nil {
-						require.True(t, tt.errorCheck(err))
+						tt.errorCheck(t, err)
 					}
 				} else {
 					require.NoError(t, err)

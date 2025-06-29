@@ -21,6 +21,10 @@ import (
 	"github.com/picatz/jose/pkg/jws"
 )
 
+var (
+	ErrInvalidToken = fmt.Errorf("jwt: invalid token")
+)
+
 // Type "JWT" is the media type used by JSON Web Token (JWT).
 //
 // # Example
@@ -109,13 +113,21 @@ func New[T jwa.SigningKey](params header.Parameters, claims ClaimsSet, key T) (*
 			default:
 				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
 			}
-		case Issuer, Subject:
+		case Issuer, Subject, JWTID:
 			switch v := value.(type) {
 			// good
 			case string:
+				// Only validate issuer claim cannot be empty (iss is critical for security)
+				if name == Issuer && v == "" {
+					return nil, fmt.Errorf("issuer claim cannot be empty string")
+				}
 			// ok
 			case fmt.Stringer:
-				claims[name] = v.String()
+				strValue := v.String()
+				if name == Issuer && strValue == "" {
+					return nil, fmt.Errorf("issuer claim cannot be empty string")
+				}
+				claims[name] = strValue
 			// bad
 			default:
 				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
@@ -124,11 +136,19 @@ func New[T jwa.SigningKey](params header.Parameters, claims ClaimsSet, key T) (*
 			switch v := value.(type) {
 			// good
 			case string:
+				// Only validate non-empty if audience validation will be performed
+				// (let runtime validation handle empty audience checking)
 			// ok
 			case fmt.Stringer:
 				claims[name] = v.String()
-			// meh, but ok
+			// meh, but ok - validate each element
 			case []string:
+				// Basic validation for arrays
+				for i, aud := range v {
+					if aud == "" {
+						return nil, fmt.Errorf("audience claim array element %d cannot be empty string", i)
+					}
+				}
 			// bad
 			default:
 				return nil, fmt.Errorf("cannot use type %T with %q claim", v, name)
@@ -137,10 +157,12 @@ func New[T jwa.SigningKey](params header.Parameters, claims ClaimsSet, key T) (*
 	}
 
 	// Ensure the "typ" header parameter is set to "JWT", as it is required.
-	if _, ok := params[header.Type]; !ok {
+	if !params.Has(header.Type) {
 		params[header.Type] = Type
-	} else if params[header.Type] != Type {
-		return nil, fmt.Errorf("header type %q is not supported", params[header.Type])
+	} else {
+		if existingType, err := params.Get(header.Type); err == nil && existingType != Type {
+			return nil, fmt.Errorf("header type %q is not supported", existingType)
+		}
 	}
 
 	// Create a token, in preparation to sign it.
@@ -271,12 +293,8 @@ func ParseAndVerify[T Parseable](input T, veryifyOptions ...VerifyOption) (*Toke
 // Otherwise, use Parse to parse a token, and then
 // use the VerifySignature method to verify the signature.
 func ParseString(input string) (*Token, error) {
-	// RFC 7519 Section 7.2: Validate JWT structure first
-	if err := validateJWTStructure(input); err != nil {
-		return nil, err
-	}
-
 	// First, we split our input into three parts, separated by dots.
+	// This also validates the JWT structure per RFC 7519 Section 7.2
 	parts, err := splitToken(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to split token: %w", err)
@@ -304,8 +322,10 @@ func ParseString(input string) (*Token, error) {
 	}
 
 	// Ensure we're using JWA types instead of raw string values.
-	if _, ok := h[header.Algorithm]; ok {
-		h[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", h[header.Algorithm]))
+	if h.Has(header.Algorithm) {
+		if algValue, err := h.Get(header.Algorithm); err == nil {
+			h[header.Algorithm] = jwa.Algorithm(fmt.Sprintf("%v", algValue))
+		}
 	}
 
 	// Next, we decode the claims base64 content.
@@ -317,6 +337,11 @@ func ParseString(input string) (*Token, error) {
 	// RFC 7519 Section 7.2 Step 10: Verify UTF-8 encoded completely valid JSON
 	if len(b) == 0 {
 		return nil, fmt.Errorf("failed to decode claims JSON: claims cannot be empty")
+	}
+
+	// RFC 7519 Section 7.2 Step 10: Verify UTF-8 encoded completely valid JSON
+	if !utf8.Valid(b) {
+		return nil, fmt.Errorf("claims are not valid UTF-8")
 	}
 
 	// Decode the claims JSON.
@@ -384,6 +409,44 @@ func ParseString(input string) (*Token, error) {
 				claims[NotBefore] = int64(v)
 			default:
 				return nil, fmt.Errorf("invalid type %T used for %q", v, NotBefore)
+			}
+		}
+
+		// Process string claims (iss, sub, jti) for proper validation
+		for _, claimName := range []ClaimName{Issuer, Subject, JWTID} {
+			if claimValue, ok := claims[claimName]; ok {
+				switch v := claimValue.(type) {
+				case string:
+					// Only validate issuer cannot be empty (critical for security)
+					if claimName == Issuer && v == "" {
+						return nil, fmt.Errorf("issuer claim cannot be empty string")
+					}
+				default:
+					return nil, fmt.Errorf("invalid type %T used for %q claim", v, claimName)
+				}
+			}
+		}
+
+		// Process Audience claim which can be string or array of strings
+		if audience, ok := claims[Audience]; ok {
+			switch v := audience.(type) {
+			case string:
+				// Allow empty strings in parsing, validate during verification if needed
+			case []interface{}:
+				// Convert []interface{} to []string if all elements are strings
+				stringArray := make([]string, len(v))
+				for i, elem := range v {
+					if str, ok := elem.(string); ok {
+						stringArray[i] = str
+					} else {
+						return nil, fmt.Errorf("invalid audience element type %T at index %d", elem, i)
+					}
+				}
+				claims[Audience] = stringArray
+			case []string:
+				// Accept existing string array as-is
+			default:
+				return nil, fmt.Errorf("invalid type %T used for %q claim", v, Audience)
 			}
 		}
 	}
@@ -625,7 +688,7 @@ func (t *Token) Expires() (bool, error) {
 	}
 	_, ok = expValue.(int64)
 	if !ok {
-		return false, fmt.Errorf("invalid value %q for %q", expValue, ExpirationTime)
+		return false, fmt.Errorf("invalid value %q of type %[1]T for %q", expValue, ExpirationTime)
 	}
 	return true, nil
 }
@@ -657,39 +720,37 @@ var algHash = map[jwa.Algorithm]crypto.Hash{
 func (t *Token) VerifySignature(allowedAlgs []jwa.Algorithm, allowedKeys map[string]any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
-		return fmt.Errorf("failed to verify alg: %w", err)
+		return fmt.Errorf("%w: failed to get algorithm from header: %w", ErrInvalidToken, err)
 	}
 
-	if !slices.Contains(allowedAlgs, alg) {
-		return fmt.Errorf("requested algorithm %q is not allowed", alg)
+	// RFC 7518 Section 3.1 - Validate algorithm against known secure algorithms
+	// Prevent algorithm confusion attacks by strictly validating algorithm values
+	if err := jwa.ValidateAlgorithm(alg, allowedAlgs); err != nil {
+		return fmt.Errorf("%w: failed to validate algorithm: %w", ErrInvalidToken, err)
 	}
 
 	// Special handling for "none" algorithm per RFC 7518 Section 3.1
 	// Note: Additional check for InsecureAllowNone is done in the Verify method
 	if alg == jwa.None {
-		if !slices.Contains(allowedAlgs, jwa.None) {
-			return fmt.Errorf("algorithm %q is not allowed", alg)
-		}
 		// For "none" algorithm, signature must be empty
 		if len(t.Signature) != 0 {
-			return fmt.Errorf("signature must be empty for algorithm %q", alg)
+			return fmt.Errorf("%w: signature must be empty when algorithm is %q", ErrInvalidToken, alg)
 		}
 		return nil
 	}
 
 	// Require a key (symmetric or asymmetric) for all algorithms except "none".
 	if len(allowedKeys) == 0 {
-		return fmt.Errorf("no key provided to verify signature using algorithm %q", alg)
+		return fmt.Errorf("%w: no key provided to verify signature using algorithm %q", ErrInvalidToken, alg)
 	}
 
 	// There might be a key identifier we want to use.
 	var keyID string
 	if t.Header.Has(header.KeyID) {
-		kid, err := t.Header.Get(header.KeyID)
+		keyID, err = header.Get[string](t.Header, header.KeyID)
 		if err != nil {
-			return fmt.Errorf("failed to get key ID: %w", err)
+			return fmt.Errorf("%w: failed to get key ID %q: %w", ErrInvalidToken, header.KeyID, err)
 		}
-		keyID = fmt.Sprintf("%v", kid)
 	}
 
 	// Verify the signature based on the algorithm.
@@ -1123,13 +1184,13 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	// explicitly allowed "none" algorithm is set in the config.
 	err := t.VerifySignature(config.AllowedAlgorithms, config.AllowedKeys)
 	if err != nil {
-		return fmt.Errorf("failed to validate token signature: %w", err)
+		return fmt.Errorf("%w: failed to verify token signature: %v", ErrInvalidToken, err)
 	}
 
 	// Validate critical headers per RFC 7515 section 4.1.11
 	err = t.Header.ValidateCriticalHeaders(config.SupportedCriticalHeaders)
 	if err != nil {
-		return fmt.Errorf("failed to validate critical headers: %w", err)
+		return fmt.Errorf("%w: failed to validate critical headers: %v", ErrInvalidToken, err)
 	}
 
 	// If the allowed issuers is empty, then any issuer is allowed.
@@ -1138,14 +1199,14 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 	if config.AllowedIssuers != nil {
 		issuer, ok := t.Claims[Issuer]
 		if !ok {
-			return fmt.Errorf("missing %q claim in token", Issuer)
+			return fmt.Errorf("%w: missing %q claim in token", ErrInvalidToken, Issuer)
 		}
 		issuerStr, ok := issuer.(string)
 		if !ok {
-			return fmt.Errorf("invalid issuer type %T in token claims", issuer)
+			return fmt.Errorf("%w: invalid %q claim type %T in token", ErrInvalidToken, Issuer, issuer)
 		}
 		if !slices.Contains(config.AllowedIssuers, issuerStr) {
-			return fmt.Errorf("requested issuer %q is not allowed", issuerStr)
+			return fmt.Errorf("%w: requested issuer %q is not allowed", ErrInvalidToken, issuerStr)
 		}
 	}
 
@@ -1179,6 +1240,22 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 			}
 			if !found {
 				return fmt.Errorf("none of the requested audiences %q are allowed", aud)
+			}
+		case []interface{}:
+			// Handle JSON unmarshaling case where array might be []interface{}
+			found := false
+			for _, aud := range aud {
+				if audStr, ok := aud.(string); ok {
+					if slices.Contains(config.AllowedAudiences, audStr) {
+						found = true
+						break
+					}
+				} else {
+					return fmt.Errorf("invalid audience element type %T in token claims", aud)
+				}
+			}
+			if !found {
+				return fmt.Errorf("none of the requested audiences are allowed")
 			}
 		default:
 			return fmt.Errorf("invalid audience type %T in token claims", t.Claims[Audience])
@@ -1228,6 +1305,28 @@ func (t *Token) Verify(opts ...VerifyOption) error {
 			}
 		} else {
 			return fmt.Errorf("token contains invalid %q value %v", NotBefore, notBeforeValue)
+		}
+	}
+
+	// Verify issued at (iat) claim per RFC 7519 Section 4.1.6
+	// Only validate if iat is not excessively in the future to prevent obvious forgeries
+	if issuedAtValue, ok := t.Claims[IssuedAt]; ok {
+		if issuedAtInt, ok := issuedAtValue.(int64); ok {
+			issuedAt := time.Unix(issuedAtInt, 0)
+			now := config.Clock()
+
+			// Check if iat is too far in the future (with tolerance)
+			// Only flag tokens that are clearly forged (more than 1 hour in future)
+			futureThreshold := now.Add(time.Hour)
+			if config.ClockSkewTolerance > time.Hour {
+				futureThreshold = now.Add(config.ClockSkewTolerance)
+			}
+			if issuedAt.After(futureThreshold) {
+				return fmt.Errorf("token issued at time %v is too far in the future (now: %v)",
+					issuedAt.UTC(), now.UTC())
+			}
+		} else {
+			return fmt.Errorf("token contains invalid %q value %v", IssuedAt, issuedAtValue)
 		}
 	}
 
@@ -1286,23 +1385,27 @@ func (t *Token) signingInput() (string, error) {
 
 // splitToken splits a JWT into its three parts, returning an error if the
 // token is not in the correct format. This implements the parsing step
-// from RFC 7519 Section 7.2.
+// from RFC 7519 Section 7.2 with combined structure validation.
+//
+// https://datatracker.ietf.org/doc/html/rfc7519#section-7.2
 func splitToken(token string) ([3]string, error) {
-	var parts [3]string
-	var i, j int
-
-	// Split into exactly 3 parts
-	for k := 0; k < 2; k++ {
-		j = strings.IndexByte(token[i:], '.') + i
-		if j < i {
-			return [3]string{}, fmt.Errorf("jwt: incorrect number of JWT parts")
-		}
-		parts[k] = token[i:j]
-		i = j + 1
+	// RFC 7519 Section 7.2: Validate JWT structure first
+	if len(token) == 0 {
+		return [3]string{}, fmt.Errorf("%w: token is empty", ErrInvalidToken)
 	}
-	parts[2] = token[i:]
 
-	return parts, nil
+	// Count dots using strings.Count to ensure exactly 2 dots
+	dotCount := strings.Count(token, ".")
+	if dotCount != 2 {
+		return [3]string{}, fmt.Errorf("%w: expected 2 dots, got %d", ErrInvalidToken, dotCount)
+	}
+
+	parts := strings.SplitN(token, dot, 3)
+	if len(parts) != 3 {
+		return [3]string{}, fmt.Errorf("%w: incorrect number of JWT parts", ErrInvalidToken)
+	}
+
+	return [3]string{parts[0], parts[1], parts[2]}, nil
 }
 
 // FromHTTPAuthorizationHeader extracts a JWT string from the Authorization header of an HTTP request.
@@ -1368,29 +1471,6 @@ func FromContext(ctx context.Context) *Token {
 // WithContext sets the JWT in the given context.
 func WithContext(ctx context.Context, token *Token) context.Context {
 	return context.WithValue(ctx, ContextKey, token)
-}
-
-// validateJWTStructure performs RFC 7519 Section 7.2 compliant validation of JWT structure
-// before attempting to parse individual components.
-func validateJWTStructure(input string) error {
-	if len(input) == 0 {
-		return fmt.Errorf("jwt: incorrect number of JWT parts")
-	}
-
-	// Count the number of dots - need at least 2 for valid JWT structure
-	// Note: extra dots are treated as part of the signature and will fail later during base64 decoding
-	dotCount := 0
-	for _, char := range input {
-		if char == '.' {
-			dotCount++
-		}
-	}
-
-	if dotCount < 2 {
-		return fmt.Errorf("jwt: incorrect number of JWT parts")
-	}
-
-	return nil
 }
 
 // verifyHMACSignatureWithKeys verifies HMAC signature using the provided keys.

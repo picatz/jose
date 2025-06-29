@@ -36,7 +36,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 			jwt.WithKey(rsaKeyPair.public),
 		)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "requested algorithm \"RS256\" is not allowed")
+		require.ErrorIs(t, err, jwt.ErrInvalidToken)
 	})
 
 	t.Run("Weak HMAC Key", func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 		// Should fail without explicit allowance
 		err := token.Verify()
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "requested algorithm \"none\" is not allowed")
+		require.ErrorIs(t, err, jwt.ErrInvalidToken)
 
 		// Should still fail even with explicit allowance if signature is not empty
 		tokenWithSig := &jwt.Token{
@@ -92,7 +92,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 		)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "signature must be empty for algorithm \"none\"")
+		require.ErrorIs(t, err, jwt.ErrInvalidToken)
 	})
 
 	t.Run("Missing Algorithm Header", func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 
 		err := token.Verify(jwt.WithKey(testHMACSecretKey))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "is not allowed")
+		require.ErrorIs(t, err, jwt.ErrInvalidToken)
 	})
 }
 
@@ -267,7 +267,7 @@ func TestInvalidSignatures(t *testing.T) {
 
 		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to validate token signature")
+		require.ErrorIs(t, err, jwt.ErrInvalidToken)
 	})
 
 	t.Run("Wrong Key Type for Algorithm", func(t *testing.T) {
