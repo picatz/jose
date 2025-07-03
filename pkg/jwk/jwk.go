@@ -306,13 +306,13 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 	// RSA public exponent must be a positive integer less than 2^31 and at
 	// least 2, matching crypto/rsa's expectations.
 	if !e.IsInt64() || e.BitLen() > 31 {
-		err = fmt.Errorf("invalid RSA public exponent")
+		err = fmt.Errorf("invalid RSA public exponent: bit length %d", e.BitLen())
 		return
 	}
 
 	exp := e.Int64()
 	if exp < 2 || exp > math.MaxInt32 {
-		err = fmt.Errorf("invalid RSA public exponent")
+		err = fmt.Errorf("invalid RSA public exponent: %d", exp)
 		return
 	}
 

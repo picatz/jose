@@ -406,7 +406,8 @@ func TestRSAPublicKeyExponentValidation(t *testing.T) {
 		if len(b) == 0 {
 			b = []byte{0}
 		}
-		s, _ := base64.Encode(b)
+		s, err := base64.Encode(b)
+		require.NoError(t, err, "failed to encode integer to base64")
 		return s
 	}
 
