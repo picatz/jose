@@ -87,11 +87,11 @@ func (claims ClaimsSet) Names() []ClaimName {
 	return names
 }
 
-// GetCalimValue returns the ClaimValue for the given ClaimName of type T.
+// GetClaimValue returns the ClaimValue for the given ClaimName of type T.
 //
 // It returns an error if the ClaimValue is not of type T, or if the ClaimName
 // is not found in the ClaimsSet.
-func GetCalimValue[T any](claims ClaimsSet, name ClaimName) (T, error) {
+func GetClaimValue[T any](claims ClaimsSet, name ClaimName) (T, error) {
 	var empty T
 
 	value, err := claims.Get(name)

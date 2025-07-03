@@ -5,7 +5,6 @@ import (
 	"crypto/elliptic"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,14 +21,6 @@ func createTestHTTPContext(t *testing.T, timeout time.Duration) (context.Context
 	}
 	t.Cleanup(cancel)
 	return ctx, client
-}
-
-// skipIfExternalJWKTestsDisabled skips tests that fetch external JWKs when the
-// RUN_EXTERNAL_JWK_TESTS environment variable is not set.
-func skipIfExternalJWKTestsDisabled(t *testing.T) {
-	if os.Getenv("RUN_EXTERNAL_JWK_TESTS") == "" {
-		t.Skip("skipping external JWK tests; set RUN_EXTERNAL_JWK_TESTS=1 to run")
-	}
 }
 
 func TestValueECDSA(t *testing.T) {
@@ -159,7 +150,6 @@ func TestSet(t *testing.T) {
 }
 
 func TestGoogleWellKnownCertsV3(t *testing.T) {
-	skipIfExternalJWKTestsDisabled(t)
 	ctx, httpClient := createTestHTTPContext(t, 5*time.Second)
 
 	// https://accounts.google.com/.well-known/openid-configuration
@@ -197,7 +187,6 @@ func TestGoogleWellKnownCertsV3(t *testing.T) {
 }
 
 func TestMicrosoftLoginWellKnownKeys(t *testing.T) {
-	skipIfExternalJWKTestsDisabled(t)
 	ctx, httpClient := createTestHTTPContext(t, 5*time.Second)
 
 	// https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration
