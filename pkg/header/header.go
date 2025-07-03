@@ -152,9 +152,8 @@ func (h Parameters) Algorithm() (jwa.Algorithm, error) {
 	return Get[jwa.Algorithm](h, Algorithm)
 }
 
-// SymetricAlgorithm returns the symetric algorithm used in the header,
-// if the algorithm is symetric. If the algorithm is not symetric, then
-// the function returns false.
+// SymetricAlgorithm returns true if the algorithm used in the header is
+// symmetric. If the algorithm is not symmetric, the function returns false.
 func (h Parameters) SymetricAlgorithm() (bool, error) {
 	alg, err := h.Algorithm()
 	if err != nil {
@@ -169,9 +168,8 @@ func (h Parameters) SymetricAlgorithm() (bool, error) {
 	return false, nil
 }
 
-// AsymetricAlgorithm returns the symetric algorithm used in the header,
-// if the algorithm is asymetric. If the algorithm is not asymetric, then
-// the function returns false.
+// AsymetricAlgorithm returns true if the algorithm used in the header is
+// asymmetric. If the algorithm is not asymmetric, the function returns false.
 func (h Parameters) AsymetricAlgorithm() (bool, error) {
 	alg, err := h.Algorithm()
 	if err != nil {
@@ -190,11 +188,11 @@ func (h Parameters) AsymetricAlgorithm() (bool, error) {
 	return false, nil
 }
 
-// Get returns the value for a given paramater name from the set of JOSE header paramaters.
+// Get returns the value for a given parameter name from the set of JOSE header parameters.
 //
-// This is a convenience function for accessing the value of a paramater from the JOSE header
-// without having to check if the paramater exists in the header first. This function will
-// return an error if the paramater does not exist in the header.
+// This is a convenience function for accessing the value of a parameter from the JOSE header
+// without having to check if the parameter exists in the header first. This function will
+// return an error if the parameter does not exist in the header.
 func (h Parameters) Get(param ParameterName) (any, error) {
 	return Get[any](h, param)
 }

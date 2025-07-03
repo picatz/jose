@@ -4,7 +4,7 @@ import (
 	"github.com/picatz/jose/pkg/header"
 )
 
-// Registered header paramater names used in JWE.
+// Registered header parameter names used in JWE.
 //
 // https://datatracker.ietf.org/doc/html/rfc7516#section-4.1
 const (
