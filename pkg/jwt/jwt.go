@@ -579,7 +579,7 @@ func WithAllowedAlgorithms(algs ...jwa.Algorithm) VerifyOption {
 // randomly generated key ID.
 //
 // This is the preferred way to add a key to the set of allowed keys,
-// because it will ensure that the givne key is of the correct type
+// because it will ensure that the given key is of the correct type
 // at compile time.
 func WithKey[T jwa.VerifyKey](key T) VerifyOption {
 	return func(vc *VerifyConfig) error {
@@ -607,7 +607,7 @@ func WithKey[T jwa.VerifyKey](key T) VerifyOption {
 // WithIdentifiableKey adds a key by ID to the set of allowed keys for the JWT.
 //
 // This is the preferred way to add a key to the set of allowed keys,
-// because it will ensure that the givne key is of the correct type
+// because it will ensure that the given key is of the correct type
 // at compile time.
 func WithIdentifiableKey[T jwa.VerifyKey](kid string, key T) VerifyOption {
 	return func(vc *VerifyConfig) error {

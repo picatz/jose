@@ -26,7 +26,7 @@ func NewSymmetricKey(size int) ([]byte, error) {
 
 	_, err := rand.Read(key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate new symmetic key: %w", err)
+		return nil, fmt.Errorf("failed to generate new symmetric key: %w", err)
 	}
 
 	return key, nil
@@ -181,7 +181,7 @@ func ParseEdDSAPublicKey(r io.Reader) (ed25519.PublicKey, error) {
 
 	_, err = asn1.Unmarshal(block.Bytes, &asn1PubKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse EdDSA public key ANS.1")
+		return nil, fmt.Errorf("failed to parse EdDSA public key ASN.1")
 	}
 
 	return ed25519.PublicKey(asn1PubKey.PublicKey.Bytes), nil
@@ -209,7 +209,7 @@ func ParseEdDSAPrivateKey(r io.Reader) (ed25519.PrivateKey, error) {
 
 	_, err = asn1.Unmarshal(block.Bytes, &asn1PrivKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse EdDSA private key ANS.1")
+		return nil, fmt.Errorf("failed to parse EdDSA private key ASN.1")
 	}
 
 	seed := asn1PrivKey.PrivateKey[2:]

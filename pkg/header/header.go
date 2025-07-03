@@ -188,11 +188,11 @@ func (h Parameters) AsymmetricAlgorithm() (bool, error) {
 	return false, nil
 }
 
-// Get returns the value for a given paramater name from the set of JOSE header paramaters.
+// Get returns the value for a given parameter name from the set of JOSE header parameters.
 //
-// This is a convenience function for accessing the value of a paramater from the JOSE header
-// without having to check if the paramater exists in the header first. This function will
-// return an error if the paramater does not exist in the header.
+// This is a convenience function for accessing the value of a parameter from the JOSE header
+// without having to check if the parameter exists in the header first. This function will
+// return an error if the parameter does not exist in the header.
 func (h Parameters) Get(param ParameterName) (any, error) {
 	return Get[any](h, param)
 }

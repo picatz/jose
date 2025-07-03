@@ -91,6 +91,6 @@ if err != nil {
 
 [JOSE](https://datatracker.ietf.org/wg/jose/documents/) was developed by an IETF [working group](https://www.ietf.org/how/wgs/), 
  started in 2011. The group set out to develop a [JSON](https://datatracker.ietf.org/doc/html/rfc4627) syntax that could be 
-used by applications to describe "secure data objects". It has become a well known, standardized mechanism for integrity protection 
+used by applications to describe "secure data objects". It has become a well-known, standardized mechanism for integrity protection 
 and encryption, as well as the format for keys and algorithm identifiers to support interoperability of security services for 
 protocols that use JSON.
