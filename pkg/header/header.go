@@ -152,10 +152,9 @@ func (h Parameters) Algorithm() (jwa.Algorithm, error) {
 	return Get[jwa.Algorithm](h, Algorithm)
 }
 
-// SymetricAlgorithm returns the symetric algorithm used in the header,
-// if the algorithm is symetric. If the algorithm is not symetric, then
-// the function returns false.
-func (h Parameters) SymetricAlgorithm() (bool, error) {
+// SymmetricAlgorithm returns true if the algorithm used in the header is
+// symmetric. If the algorithm is not symmetric, the function returns false.
+func (h Parameters) SymmetricAlgorithm() (bool, error) {
 	alg, err := h.Algorithm()
 	if err != nil {
 		return false, err
@@ -169,10 +168,9 @@ func (h Parameters) SymetricAlgorithm() (bool, error) {
 	return false, nil
 }
 
-// AsymetricAlgorithm returns the symetric algorithm used in the header,
-// if the algorithm is asymetric. If the algorithm is not asymetric, then
-// the function returns false.
-func (h Parameters) AsymetricAlgorithm() (bool, error) {
+// AsymmetricAlgorithm returns true if the algorithm used in the header is
+// asymmetric. If the algorithm is not asymmetric, the function returns false.
+func (h Parameters) AsymmetricAlgorithm() (bool, error) {
 	alg, err := h.Algorithm()
 	if err != nil {
 		return false, err
