@@ -3,12 +3,18 @@ package jwk
 import (
 	"context"
 	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
+	"fmt"
+	"math"
+	"math/big"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/picatz/jose/pkg/base64"
 	"github.com/stretchr/testify/require"
 )
 
@@ -305,6 +311,24 @@ func TestErrorMessages(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "key \"nonexistent\" not found in set")
 	})
+
+	t.Run("RSAPublicKey with large exponent", func(t *testing.T) {
+		input := `{
+                       "kty":"RSA",
+                       "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+                       "e":"AQAAAAAAAAAA",
+                       "alg":"RS256",
+                       "kid":"large-exp"
+               }`
+
+		value := Value{}
+		err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
+		require.NoError(t, err)
+
+		_, _, err = RSAPublicKey(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exponent")
+	})
 }
 
 func TestValidate(t *testing.T) {
@@ -330,4 +354,88 @@ func TestValidate(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid curve")
 	})
+}
+
+// TestRSAModulusSizeValidation ensures RSAPublicKey enforces a minimum
+// modulus size of 2048 bits, rejecting smaller RSA moduli.
+func TestRSAModulusSizeValidation(t *testing.T) {
+	const validInput = `{
+               "kty":"RSA",
+               "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+               "e":"AQAB",
+               "alg":"RS256",
+               "kid":"2011-04-29"
+       }`
+
+	t.Run("valid modulus", func(t *testing.T) {
+		var value Value
+		err := json.NewDecoder(strings.NewReader(validInput)).Decode(&value)
+		require.NoError(t, err)
+
+		pkey, _, err := RSAPublicKey(value)
+		require.NoError(t, err)
+		require.Equal(t, 2048, pkey.N.BitLen())
+	})
+
+	t.Run("modulus too small", func(t *testing.T) {
+		key, err := rsa.GenerateKey(rand.Reader, 1024)
+		require.NoError(t, err)
+
+		nEnc, err := base64.Encode(key.N.Bytes())
+		require.NoError(t, err)
+
+		input := fmt.Sprintf(`{"kty":"RSA","n":"%s","e":"AQAB"}`, nEnc)
+		var value Value
+		err = json.NewDecoder(strings.NewReader(input)).Decode(&value)
+		require.NoError(t, err)
+
+		_, _, err = RSAPublicKey(value)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "modulus too small")
+	})
+}
+
+// TestRSAPublicKeyExponentValidation exercises RSAPublicKey with a variety of
+// exponent values, ensuring that invalid exponents are rejected and valid ones
+// are accepted.
+func TestRSAPublicKeyExponentValidation(t *testing.T) {
+	const n = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
+
+	encodeInt := func(i *big.Int) string {
+		b := i.Bytes()
+		if len(b) == 0 {
+			b = []byte{0}
+		}
+		s, _ := base64.Encode(b)
+		return s
+	}
+
+	tests := []struct {
+		name    string
+		exp     *big.Int
+		wantErr bool
+	}{
+		{"zero", big.NewInt(0), true},
+		{"one", big.NewInt(1), true},
+		{"typical", big.NewInt(65537), false},
+		{"max-int32", big.NewInt(math.MaxInt32), false},
+		{"overflow", new(big.Int).Add(big.NewInt(math.MaxInt32), big.NewInt(1)), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eEnc := encodeInt(tc.exp)
+			input := fmt.Sprintf(`{"kty":"RSA","n":"%s","e":"%s"}`, n, eEnc)
+			var value Value
+			err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
+			require.NoError(t, err)
+
+			_, _, err = RSAPublicKey(value)
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

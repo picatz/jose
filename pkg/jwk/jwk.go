@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"sync"
@@ -288,6 +289,11 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 	}
 	n.SetBytes(nBytes)
 
+	if n.BitLen() < 2048 {
+		err = fmt.Errorf("RSA modulus too small: %d bits", n.BitLen())
+		return
+	}
+
 	pkey.N = n
 
 	eBytes, err := base64.Decode(eEnc)
@@ -297,7 +303,20 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 	}
 	e.SetBytes(eBytes)
 
-	pkey.E = int(e.Int64())
+	// RSA public exponent must be a positive integer less than 2^31 and at
+	// least 2, matching crypto/rsa's expectations.
+	if !e.IsInt64() || e.BitLen() > 31 {
+		err = fmt.Errorf("invalid RSA public exponent")
+		return
+	}
+
+	exp := e.Int64()
+	if exp < 2 || exp > math.MaxInt32 {
+		err = fmt.Errorf("invalid RSA public exponent")
+		return
+	}
+
+	pkey.E = int(exp)
 
 	// d is optional
 	if len(dEnc) > 0 {
