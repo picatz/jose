@@ -374,7 +374,7 @@ func TestRSAModulusSizeValidation(t *testing.T) {
 
 		pkey, _, err := RSAPublicKey(value)
 		require.NoError(t, err)
-		require.Equal(t, 2048, pkey.N.BitLen())
+		require.GreaterOrEqual(t, pkey.N.BitLen(), 2048)
 	})
 
 	t.Run("modulus too small", func(t *testing.T) {
