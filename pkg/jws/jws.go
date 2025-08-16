@@ -83,7 +83,11 @@ func Parse(input string) (*Signature, error) {
 		return nil, fmt.Errorf("empty JWS string")
 	}
 
-	parts := strings.Split(input, ".")
+	if dotCount := strings.Count(input, "."); dotCount != 2 {
+		return nil, fmt.Errorf("invalid JWS format: expected 2 dots, got %d", dotCount)
+	}
+
+	parts := strings.SplitN(input, ".", 3)
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid JWS format: expected 3 parts, got %d", len(parts))
 	}
