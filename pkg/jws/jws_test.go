@@ -136,13 +136,13 @@ func TestJWSParsing(t *testing.T) {
 	t.Run("invalid format - too few parts", func(t *testing.T) {
 		_, err := Parse("header.payload")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "expected 3 parts, got 2")
+		require.Contains(t, err.Error(), "expected 2 dots, got 1")
 	})
 
 	t.Run("invalid format - too many parts", func(t *testing.T) {
 		_, err := Parse("header.payload.signature.extra")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "expected 3 parts, got 4")
+		require.Contains(t, err.Error(), "expected 2 dots, got 3")
 	})
 
 	t.Run("invalid base64 header", func(t *testing.T) {
