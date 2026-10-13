@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -332,7 +333,10 @@ func ParseString(input string) (*Token, error) {
 		return nil, fmt.Errorf("header is not valid UTF-8")
 	}
 
-	// Decode the header JSON.
+	// Decode the header JSON, refusing duplicate names (RFC 7515 §4).
+	if err := strictjson.CheckDuplicates(b); err != nil {
+		return nil, fmt.Errorf("failed to decode JOSE header JSON: %w", err)
+	}
 	h := header.Parameters{}
 	err = json.Unmarshal(b, &h)
 	if err != nil {
@@ -362,7 +366,10 @@ func ParseString(input string) (*Token, error) {
 		return nil, fmt.Errorf("claims are not valid UTF-8")
 	}
 
-	// Decode the claims JSON.
+	// Decode the claims JSON, refusing duplicate names (RFC 7519 §4).
+	if err := strictjson.CheckDuplicates(b); err != nil {
+		return nil, fmt.Errorf("failed to decode claims JSON: %w", err)
+	}
 	claims := ClaimsSet{}
 	err = json.Unmarshal(b, &claims)
 	if err != nil {

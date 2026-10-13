@@ -300,3 +300,57 @@ func TestParseJSONRefusals(t *testing.T) {
 		t.Fatal("SignJSON accepted no signers")
 	}
 }
+
+// Duplicate member names could make two verifiers read different values,
+// so they are refused in every JSON object (RFC 7515 §4).
+func TestDuplicateMembersRefused(t *testing.T) {
+	duplicateAlg := mustEncode(t, []byte(`{"alg":"none","alg":"ES256"}`))
+	if _, err := jws.Parse(duplicateAlg + ".Y29udGVudA.c2ln"); err == nil {
+		t.Fatal("Parse accepted a header with two alg members")
+	}
+	for name, input := range map[string]string{
+		"protected header": `{"payload":"Y29udGVudA","protected":"` + duplicateAlg + `","signature":"c2ln"}`,
+		"top level":        `{"payload":"Y29udGVudA","payload":"ZXZpbA","protected":"eyJhbGciOiJFUzI1NiJ9","signature":"c2ln"}`,
+		"unprotected":      `{"payload":"Y29udGVudA","protected":"eyJhbGciOiJFUzI1NiJ9","header":{"kid":"a","kid":"b"},"signature":"c2ln"}`,
+	} {
+		if _, err := jws.ParseJSON([]byte(input)); err == nil {
+			t.Errorf("%s: ParseJSON accepted duplicate members", name)
+		}
+	}
+}
+
+func TestJSONVerifyCoversCurrentFields(t *testing.T) {
+	key := mustECDSA(t, elliptic.P256())
+	signed, err := jws.SignJSON([]byte("original"), jws.JSONSigner{Protected: jws.Header{header.Algorithm: jwa.ES256, "purpose": "test"}, Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flat, err := signed.Flattened()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := jws.ParseJSON(flat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parsed.Verify(&key.PublicKey, jwa.ES384); !errors.Is(err, jws.ErrNoValidSignature) {
+		t.Fatalf("Verify with ES256 outside the allow-list = %v", err)
+	}
+	if _, err := parsed.Verify(&key.PublicKey, jwa.ES256); err != nil {
+		t.Fatal(err)
+	}
+	parsed.Payload = []byte("changed after parsing")
+	if _, err := parsed.Verify(&key.PublicKey); !errors.Is(err, jws.ErrNoValidSignature) {
+		t.Fatalf("Verify after changing Payload = %v", err)
+	}
+	parsed.Payload = []byte("original")
+	parsed.Signatures[0].Protected["purpose"] = "other"
+	if _, err := parsed.Verify(&key.PublicKey); !errors.Is(err, jws.ErrNoValidSignature) {
+		t.Fatalf("Verify after changing Protected = %v", err)
+	}
+
+	unprotectedOnly := &jws.JSON{Payload: []byte("x"), Signatures: []jws.JSONSignature{{Unprotected: jws.Header{header.Algorithm: jwa.HS256}, Signature: []byte("sig")}}}
+	if _, err := unprotectedOnly.Compact(0); err == nil {
+		t.Fatal("Compact accepted a signature without a protected header")
+	}
+}

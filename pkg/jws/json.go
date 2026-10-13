@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -163,6 +166,9 @@ type jsonWireSig struct {
 // (§4.1.11), so any "crit" is refused. Detached payloads (RFC 7515
 // Appendix F) and unencoded payloads (RFC 7797) are not supported.
 func ParseJSON(data []byte) (*JSON, error) {
+	if err := strictjson.CheckDuplicates(data); err != nil {
+		return nil, fmt.Errorf("jws: invalid JSON serialization: %w", err)
+	}
 	var wire jsonWire
 	// Members this package does not understand are ignored, as RFC 7515
 	// §7.2.1 requires.
@@ -234,8 +240,11 @@ func parseJSONSignature(entry jsonWireSig) (JSONSignature, error) {
 	if signature.Signature, err = decodeSegment(*entry.Signature, "signature"); err != nil {
 		return JSONSignature{}, err
 	}
-	if alg == jwa.None || len(signature.Signature) == 0 {
-		return JSONSignature{}, fmt.Errorf("alg %q with an empty signature is unsecured; refusing it", alg)
+	switch {
+	case alg == jwa.None:
+		return JSONSignature{}, fmt.Errorf("alg %q is unsecured; refusing it", alg)
+	case len(signature.Signature) == 0:
+		return JSONSignature{}, errors.New("empty signature")
 	}
 	return signature, nil
 }
@@ -257,27 +266,29 @@ func checkJSONHeaders(protected, unprotected Header) error {
 
 // Verify checks the signatures against key in order and returns the index
 // of the first that verifies, so a verifier can then read that signature's
-// protected header. Signatures whose algorithm does not suit key are
-// skipped. It returns [ErrNoValidSignature] when none verifies.
+// protected header. Signatures whose algorithm does not suit key, or is
+// not in allowed when allowed is given, are skipped. It returns
+// [ErrNoValidSignature] when none verifies.
+//
+// Verification covers Payload and each Protected header as they are now:
+// the encodings a parsed JWS arrived with are used only while those fields
+// still hold what was parsed.
 //
 // Verify does not say which signer a valid signature belongs to beyond key
 // itself: treat Unprotected parameters, such as a "kid", as hints only.
-func (j *JSON) Verify(key any) (int, error) {
+func (j *JSON) Verify(key any, allowed ...jwa.Algorithm) (int, error) {
 	if key == nil {
 		return -1, errors.New("jws: Verify needs a key")
 	}
 	payload := j.encodedPayload()
 	for index, signature := range j.Signatures {
-		if signature.protected == "" && len(signature.Protected) > 0 {
-			// Built in memory rather than parsed or signed; encode the
-			// protected header the way SignJSON would.
-			protectedJSON, err := json.Marshal(signature.Protected)
-			if err != nil {
-				continue
-			}
-			signature.protected = encodeSegment(protectedJSON)
+		protected, err := signature.encodedProtected()
+		if err != nil {
+			continue
 		}
-		if alg, err := signature.Header().Algorithm(); err != nil || alg == jwa.None {
+		signature.protected = protected
+		alg, err := signature.Header().Algorithm()
+		if err != nil || alg == jwa.None || (len(allowed) > 0 && !slices.Contains(allowed, alg)) {
 			continue
 		}
 		if signature.compact(payload, j.Payload).Verify(key) == nil {
@@ -333,6 +344,9 @@ func (j *JSON) Compact(index int) (string, error) {
 	if len(signature.Unprotected) > 0 {
 		return "", errors.New("jws: the compact serialization cannot carry unprotected header parameters")
 	}
+	if len(signature.Protected) == 0 {
+		return "", errors.New("jws: the compact serialization needs a protected header with alg")
+	}
 	entry, err := signature.wire()
 	if err != nil {
 		return "", err
@@ -342,15 +356,11 @@ func (j *JSON) Compact(index int) (string, error) {
 
 func (s JSONSignature) wire() (jsonWireSig, error) {
 	var entry jsonWireSig
-	if s.protected != "" || len(s.Protected) > 0 {
-		protected := s.protected
-		if protected == "" {
-			protectedJSON, err := json.Marshal(s.Protected)
-			if err != nil {
-				return jsonWireSig{}, fmt.Errorf("jws: marshal protected header: %w", err)
-			}
-			protected = encodeSegment(protectedJSON)
-		}
+	protected, err := s.encodedProtected()
+	if err != nil {
+		return jsonWireSig{}, err
+	}
+	if protected != "" {
 		entry.Protected = &protected
 	}
 	if len(s.Unprotected) > 0 {
@@ -361,9 +371,34 @@ func (s JSONSignature) wire() (jsonWireSig, error) {
 	return entry, nil
 }
 
+// encodedProtected returns the protected header's encoding: the one it was
+// parsed or signed with while Protected still holds what that encoding
+// says, else a fresh encoding of Protected.
+func (s JSONSignature) encodedProtected() (string, error) {
+	if len(s.Protected) == 0 {
+		return "", nil
+	}
+	if s.protected != "" {
+		if decoded, err := base64.Decode(s.protected); err == nil {
+			if parsed, err := parseHeaderStrict(decoded); err == nil && reflect.DeepEqual(parsed, s.Protected) {
+				return s.protected, nil
+			}
+		}
+	}
+	protectedJSON, err := json.Marshal(s.Protected)
+	if err != nil {
+		return "", fmt.Errorf("jws: marshal protected header: %w", err)
+	}
+	return encodeSegment(protectedJSON), nil
+}
+
+// encodedPayload returns the payload's encoding as received while Payload
+// still holds those bytes, else a fresh encoding of Payload.
 func (j *JSON) encodedPayload() string {
-	if j.payload != "" || len(j.Payload) == 0 {
-		return j.payload
+	if j.payload != "" {
+		if decoded, err := base64.Decode(j.payload); err == nil && bytes.Equal(decoded, j.Payload) {
+			return j.payload
+		}
 	}
 	return encodeSegment(j.Payload)
 }

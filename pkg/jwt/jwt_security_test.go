@@ -633,3 +633,17 @@ func TestAudienceValidation(t *testing.T) {
 		}
 	})
 }
+
+// RFC 7519 §4: a JWT whose header or claims repeat a name is refused, so
+// two verifiers cannot read different values from the same token.
+func TestDuplicateNamesRefused(t *testing.T) {
+	encode := func(s string) string { out, _ := base64.Encode([]byte(s)); return out }
+	for name, token := range map[string]string{
+		"header": encode(`{"alg":"none","alg":"HS256","typ":"JWT"}`) + "." + encode(`{"sub":"alice"}`) + ".c2ln",
+		"claims": encode(`{"alg":"HS256","typ":"JWT"}`) + "." + encode(`{"sub":"alice","sub":"admin"}`) + ".c2ln",
+	} {
+		if _, err := jwt.ParseString(token); err == nil {
+			t.Errorf("%s: ParseString accepted duplicate names", name)
+		}
+	}
+}

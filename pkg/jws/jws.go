@@ -8,6 +8,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
+	_ "crypto/sha256" // SHA-256 for HS256, RS256, PS256 and ES256
+	_ "crypto/sha512" // SHA-384 and SHA-512 for the 384 and 512 variants
 	"encoding/asn1"
 	"encoding/json"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -394,8 +397,12 @@ func (t *Signature) Verify(key any) error {
 	}
 }
 
-// parseHeaderStrict implements strict JSON parsing as required by RFC 7515 Section 10.12
+// parseHeaderStrict parses a JOSE Header, refusing duplicate parameter
+// names (RFC 7515 §4) so every verifier reads the same "alg".
 func parseHeaderStrict(data []byte) (Header, error) {
+	if err := strictjson.CheckDuplicates(data); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
 	var header Header
 	if err := json.Unmarshal(data, &header); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
