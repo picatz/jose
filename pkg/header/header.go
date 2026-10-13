@@ -259,6 +259,9 @@ func IsStandardParameter(name string) bool {
 // 3. Checks no standard parameters are marked as critical
 // 4. Verifies all critical parameters are present in the header
 // 5. Validates all critical parameters are supported by the application
+//
+// A nil or empty supportedCriticalHeaders means the application understands
+// no extensions, so any "crit" header is rejected.
 func (h Parameters) ValidateCriticalHeaders(supportedCriticalHeaders []string) error {
 	// Check if the header has a "crit" (critical) parameter
 	critValue, err := h.Get(Critical)
@@ -302,7 +305,7 @@ func (h Parameters) ValidateCriticalHeaders(supportedCriticalHeaders []string) e
 	// Validate each critical header parameter
 	for _, critHeader := range critHeaders {
 		// RFC 7515 section 4.1.11: Critical header parameter names MUST be understood
-		if supportedCriticalHeaders != nil && !slices.Contains(supportedCriticalHeaders, critHeader) {
+		if !slices.Contains(supportedCriticalHeaders, critHeader) {
 			return fmt.Errorf("unsupported critical header parameter: %q", critHeader)
 		}
 
