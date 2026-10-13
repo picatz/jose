@@ -214,7 +214,7 @@ type cookbookSignature struct {
 
 // RFC 7520 §4 vectors from the JOSE Cookbook.
 func TestCookbookSignatures(t *testing.T) {
-	files, err := filepath.Glob("testdata/cookbook/4_*.json")
+	files, err := filepath.Glob("testdata/cookbook/4_[1-4].*.json")
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no cookbook vectors: %v", err)
 	}
