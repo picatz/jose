@@ -2,6 +2,7 @@ package jwkhttp
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -49,9 +50,10 @@ func TestGoogleWellKnownCertsV3(t *testing.T) {
 			require.NotEmpty(t, e)
 			// d is optional, used for RSA key blinding https://datatracker.ietf.org/doc/html/rfc7517#ref-Kocher
 
-			pkey, _, err := jwk.RSAPublicKey(key)
+			public, err := jwk.PublicKey(key)
 			require.NoError(t, err)
-			require.NotNil(t, pkey)
+			pkey, ok := public.(*rsa.PublicKey)
+			require.True(t, ok)
 			require.NotNil(t, pkey.E)
 			require.NotNil(t, pkey.N)
 			require.NotZero(t, pkey.Size())
@@ -86,9 +88,10 @@ func TestMicrosoftLoginWellKnownKeys(t *testing.T) {
 			require.NotEmpty(t, e)
 			// d is optional, used for RSA key blinding https://datatracker.ietf.org/doc/html/rfc7517#ref-Kocher
 
-			pkey, _, err := jwk.RSAPublicKey(key)
+			public, err := jwk.PublicKey(key)
 			require.NoError(t, err)
-			require.NotNil(t, pkey)
+			pkey, ok := public.(*rsa.PublicKey)
+			require.True(t, ok)
 			require.NotNil(t, pkey.E)
 			require.NotNil(t, pkey.N)
 			require.NotZero(t, pkey.Size())

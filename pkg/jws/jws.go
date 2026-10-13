@@ -756,42 +756,6 @@ func (t *Signature) VerifyHMAC(hash crypto.Hash, key any, signingInput string) e
 	return t.hmacVerify(hash, key, signingInput)
 }
 
-// VerifyHMACForLegacy performs HMAC verification without key size validation.
-// This is used for verifying existing tokens that may have been created with weaker keys.
-func (t *Signature) VerifyHMACForLegacy(hash crypto.Hash, key any, signingInput string) error {
-	var secretKey []byte
-
-	// Convert key to byte slice
-	switch keyTyped := key.(type) {
-	case []byte:
-		secretKey = keyTyped
-	case string:
-		secretKey = []byte(keyTyped)
-	default:
-		return fmt.Errorf("HMAC verification requires []byte or string key, got %T", key)
-	}
-
-	// Ensure the secret key is not empty
-	if len(secretKey) == 0 {
-		return fmt.Errorf("HMAC secret key cannot be empty")
-	}
-
-	// Skip key size validation for verification to maintain compatibility with legacy tokens
-
-	if !hash.Available() {
-		return fmt.Errorf("hash function %v not available", hash)
-	}
-
-	h := hmac.New(hash.New, secretKey)
-	h.Write([]byte(signingInput))
-	expectedSig := h.Sum(nil)
-
-	if !hmac.Equal(t.Signature, expectedSig) {
-		return fmt.Errorf("HMAC signature verification failed")
-	}
-	return nil
-}
-
 // SignRSA performs RSA PKCS1v15 signing with the given hash and key.
 // This method provides advanced validation per RFC 7518.
 func (t *Signature) SignRSA(hash crypto.Hash, key any, signingInput string) ([]byte, error) {

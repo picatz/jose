@@ -1,7 +1,9 @@
 package jwk
 
 import (
+	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rsa"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -47,10 +49,10 @@ func TestValueRSA(t *testing.T) {
 	require.NotEmpty(t, value)
 	require.Equal(t, "2011-04-29", value[KeyID])
 
-	pkey, blindingValue, err := RSAPublicKey(value)
+	public, err := PublicKey(value)
 	require.NoError(t, err)
-	require.Nil(t, blindingValue)
-	require.NotNil(t, pkey)
+	pkey, ok := public.(*rsa.PublicKey)
+	require.True(t, ok)
 	require.NotNil(t, pkey.N)
 	require.Equal(t, 65537, pkey.E)
 }
@@ -125,9 +127,10 @@ func TestSet(t *testing.T) {
 			require.NotEmpty(t, x)
 			require.NotEmpty(t, y)
 
-			pkey, _, err := ECDSAPublicKey(key)
+			public, err := PublicKey(key)
 			require.NoError(t, err)
-			require.NotNil(t, pkey)
+			pkey, ok := public.(*ecdsa.PublicKey)
+			require.True(t, ok)
 			require.NotNil(t, pkey.X)
 			require.NotNil(t, pkey.Y)
 			require.Equal(t, pkey.Curve, elliptic.P256())

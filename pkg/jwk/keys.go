@@ -360,8 +360,8 @@ func encode(b []byte) string {
 
 // PublicValue returns the minimal public JWK for key: only the members
 // RFC 7518 and RFC 8037 require for its type, with EC coordinates at their
-// full fixed width. Unlike [ValueFromPublicKey] it sets no "use", so callers
-// choose "use", "alg" and "kid" deliberately.
+// full fixed width. It sets no "use", "alg" or "kid", so callers choose
+// them deliberately.
 //
 // key may be *[ecdsa.PublicKey], *[rsa.PublicKey], [ed25519.PublicKey] or
 // *[ecdh.PublicKey] (X25519, P-256, P-384 or P-521), or a private key or

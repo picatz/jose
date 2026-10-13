@@ -13,7 +13,7 @@ import (
 func main() {
 	const (
 		symmetricKeyID = "test"
-		symmetricKey   = "supersecret"
+		symmetricKey   = "example-hs256-secret-of-32-bytes"
 	)
 
 	token, err := jwt.New(

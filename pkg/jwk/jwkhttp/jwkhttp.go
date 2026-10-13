@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -20,7 +21,13 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
-// FetchSet fetches a JWK set from the given URL and HTTP client.
+// maxSetSize bounds the JWK Set response FetchSet reads. Published sets are
+// a few kilobytes; the bound keeps a hostile or broken endpoint from
+// exhausting memory.
+const maxSetSize = 1 << 20
+
+// FetchSet fetches a JWK set from the given URL and HTTP client. It reads
+// at most 1 MiB of response body.
 func FetchSet(ctx context.Context, url string, client *http.Client) (*jwk.Set, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -38,7 +45,7 @@ func FetchSet(ctx context.Context, url string, client *http.Client) (*jwk.Set, e
 	}
 
 	var set jwk.Set
-	err = json.NewDecoder(resp.Body).Decode(&set)
+	err = json.NewDecoder(io.LimitReader(resp.Body, maxSetSize)).Decode(&set)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JWK set: %w", err)
 	}

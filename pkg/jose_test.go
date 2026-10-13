@@ -13,12 +13,12 @@ import (
 )
 
 func ExampleParseString() {
-	token, err := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
+	token, err := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.YKkW2pAxINn-dLNQKBShDBRn57Wzd3OxmGbxtZYTvEU")
 	if err != nil {
 		panic(fmt.Sprintf("failed to parse JWT string: %v", err))
 	}
 
-	err = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("supersecret"))
+	err = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("example-hs256-secret-of-32-bytes"))
 	if err != nil {
 		panic(fmt.Sprintf("failed to verify JWT signature: %v", err))
 	}
@@ -33,12 +33,18 @@ func ExampleParseString() {
 }
 
 func TestExampleJWTParseStringAndVerifySignatureHS256(t *testing.T) {
-	token, err := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
+	token, err := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.YKkW2pAxINn-dLNQKBShDBRn57Wzd3OxmGbxtZYTvEU")
 	require.NoError(t, err)
 	require.NotNil(t, token)
 
-	err = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("supersecret"))
+	err = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("example-hs256-secret-of-32-bytes"))
 	require.NoError(t, err)
+
+	// RFC 7518 §3.2: an HS256 key shorter than 32 bytes is refused when
+	// verifying, not only when signing.
+	short, err := jwt.ParseString("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6InBpY2F0eiIsImlhdCI6MTUxNjIzOTAyMn0.UOXSwO9AAuqSpOCt-PDjMmek7SmKOR7v35rmMzeyYfM")
+	require.NoError(t, err)
+	require.ErrorIs(t, short.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey("supersecret")), jwt.ErrInvalidToken)
 
 	alg, err := token.Header.Algorithm()
 	require.NoError(t, err)
