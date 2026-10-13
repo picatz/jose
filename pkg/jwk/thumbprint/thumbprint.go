@@ -1,9 +1,15 @@
+// Package thumbprint computes JSON Web Key (JWK) Thumbprints as defined in
+// RFC 7638, including OKP keys from RFC 8037.
+//
+// A thumbprint is a stable identifier for a public key. It is commonly used
+// as a "kid" value and as the DPoP "jkt" confirmation (RFC 9449 §6.1).
 package thumbprint
 
 import (
-	"bytes"
 	"crypto"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/jwk"
@@ -13,125 +19,90 @@ var (
 	ErrInvalidKey = errors.New("thumbprint: invalid key")
 )
 
-var requiredLexicographically = []string{"crv", "e", "kty", "n", "x", "y"}
+// requiredMembers lists, per key type, the members that make up the
+// thumbprint input, already in lexicographic order.
+//
+// https://www.rfc-editor.org/rfc/rfc7638.html#section-3.2
+// https://www.rfc-editor.org/rfc/rfc8037.html#section-2
+var requiredMembers = map[string][]string{
+	jwk.KeyTypeEC:  {jwk.Curve, jwk.KeyType, jwk.X, jwk.Y},
+	jwk.KeyTypeRSA: {jwk.E, jwk.KeyType, jwk.N},
+	jwk.KeyTypeOKP: {jwk.Curve, jwk.KeyType, jwk.X},
+	jwk.KeyTypeOct: {jwk.K, jwk.KeyType},
+}
 
 // Generate returns the JWK Thumbprint for the given JWK following
-// the steps defined in RFC 7638.
+// the steps defined in RFC 7638. A zero hash selects SHA-256.
+//
+// Only the required members for the key's type contribute; all others,
+// including private members, are ignored. Each required member must be a
+// string that needs no JSON escaping, which holds for every valid JWK.
+//
+// https://www.rfc-editor.org/rfc/rfc7638.html#section-3
 func Generate(value jwk.Value, h crypto.Hash) ([]byte, error) {
+	kty, ok := value[jwk.KeyType].(string)
+	if !ok {
+		return nil, ErrInvalidKey
+	}
+	members, ok := requiredMembers[kty]
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported key type %q", ErrInvalidKey, kty)
+	}
+
 	// 1. Construct a JSON object [RFC7159] containing only the required
 	// members of a JWK representing the key and with no whitespace or
 	// line breaks before or after any syntactic elements and with the
 	// required members ordered lexicographically by the Unicode
 	// [UNICODE] code points of the member names.
-	//
-	// (This JSON object is itself a legal JWK representation of the key.)
-	subset := jwk.Value{}
-
-	for _, key := range requiredLexicographically {
-		if _, ok := value[key]; ok {
-			subset[key] = value[key]
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, name := range members {
+		v, ok := value[name].(string)
+		if !ok || v == "" {
+			return nil, fmt.Errorf("%w: missing or non-string %q", ErrInvalidKey, name)
 		}
+		if needsEscape(v) {
+			return nil, fmt.Errorf("%w: %q contains characters that need JSON escaping", ErrInvalidKey, name)
+		}
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('"')
+		b.WriteString(name)
+		b.WriteString(`":"`)
+		b.WriteString(v)
+		b.WriteByte('"')
 	}
-
-	// Ensure the key type is included.
-	if _, ok := subset[jwk.KeyType]; !ok {
-		return nil, ErrInvalidKey
-	}
-
-	// Ensure the key type is valid.
-	switch subset[jwk.KeyType] {
-	case "RSA":
-		// Ensure the modulus is included.
-		if _, ok := subset[jwk.N]; !ok {
-			return nil, ErrInvalidKey
-		}
-
-		// Ensure the exponent is included.
-		if _, ok := subset[jwk.E]; !ok {
-			return nil, ErrInvalidKey
-		}
-
-		// Do not allow any other values.
-		if len(subset) > 3 {
-			return nil, ErrInvalidKey
-		}
-	case "EC":
-		// Ensure the curve is included.
-		if _, ok := subset[jwk.Curve]; !ok {
-			return nil, ErrInvalidKey
-		}
-
-		// Ensure the x coordinate is included.
-		if _, ok := subset[jwk.X]; !ok {
-			return nil, ErrInvalidKey
-		}
-
-		// Ensure the y coordinate is included.
-		if _, ok := subset[jwk.Y]; !ok {
-			return nil, ErrInvalidKey
-		}
-
-		// Do not allow any other values.
-		if len(subset) > 4 {
-			return nil, ErrInvalidKey
-		}
-	default:
-		return nil, ErrInvalidKey
-	}
-
-	// Get a lexical representation of the JSON object, we cannot
-	// use the standard library's json.Marshal because it does not
-	// guarantee the order of the keys.
-	b := bytes.NewBuffer(nil)
-
-	b.WriteRune('{')
-
-	for i, key := range requiredLexicographically {
-		if _, ok := subset[key]; ok {
-			if i > 0 && b.Len() > 1 {
-				b.WriteRune(',')
-			}
-
-			b.WriteRune('"')
-			b.WriteString(key)
-			b.WriteRune('"')
-			b.WriteRune(':')
-
-			switch v := subset[key].(type) {
-			case string:
-				b.WriteRune('"')
-				b.WriteString(v)
-				b.WriteRune('"')
-			default:
-				b.WriteString(v.(string))
-			}
-		}
-	}
-
-	b.WriteRune('}')
+	b.WriteByte('}')
 
 	// 2. Hash the octets of the UTF-8 representation of this JSON object
-	// with a cryptographic hash function H.
-	//
-	// For example, SHA-256 might be used as H. If none is specified,
-	// SHA-256 is used; this is indicated in the algorithm header parameter
-	// of the resulting JWK Thumbprint by the value "SHA-256".
+	// with a cryptographic hash function H. If none is specified, SHA-256
+	// is used.
 	if h == 0 {
 		h = crypto.SHA256
 	}
-
-	hash := h.New()
-
-	_, err := hash.Write(b.Bytes())
-	if err != nil {
-		return nil, err
+	if !h.Available() {
+		return nil, fmt.Errorf("thumbprint: hash %v is not available", h)
 	}
-
+	hash := h.New()
+	hash.Write([]byte(b.String()))
 	return hash.Sum(nil), nil
 }
 
+// needsEscape reports whether s would be altered by JSON string encoding.
+// Required members are base64url values or short ASCII names, so any such
+// character means the JWK is malformed.
+func needsEscape(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == '"' || r == '\\' || r > 0x7e {
+			return true
+		}
+	}
+	return false
+}
+
 // GenerateString returns the JWK Thumbprint for the given JWK following
-// the steps defined in RFC 7638 as a base64 encoded string.
+// the steps defined in RFC 7638 as a base64url string.
 func GenerateString(value jwk.Value, h crypto.Hash) (string, error) {
 	thumbprint, err := Generate(value, h)
 	if err != nil {
@@ -139,4 +110,19 @@ func GenerateString(value jwk.Value, h crypto.Hash) (string, error) {
 	}
 
 	return base64.Encode(thumbprint)
+}
+
+// FromPublicKey returns the base64url SHA-256 JWK Thumbprint of a public
+// key, a private key or a [crypto.Signer]. It canonicalizes the key with
+// [jwk.PublicValue] first, so the result does not depend on how a JWK was
+// spelled. This is the value DPoP calls "jkt".
+//
+// https://www.rfc-editor.org/rfc/rfc7638.html#section-3
+// https://www.rfc-editor.org/rfc/rfc9449.html#section-6.1
+func FromPublicKey(key any) (string, error) {
+	value, err := jwk.PublicValue(key)
+	if err != nil {
+		return "", err
+	}
+	return GenerateString(value, crypto.SHA256)
 }

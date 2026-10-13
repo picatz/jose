@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -58,7 +57,8 @@ const (
 type Value = map[ParameterName]any
 
 // Validate checks that the required parameters are present for
-// the given key type, and that the values are valid.
+// the given key type, and that the values are valid. It accepts "EC", "RSA",
+// "OKP" (RFC 8037) and "oct" keys.
 func Validate(v Value) error {
 	_, ok := v[KeyType]
 	if !ok {
@@ -153,6 +153,18 @@ func Validate(v Value) error {
 			} else {
 				return fmt.Errorf("invalid type for %q", D)
 			}
+		}
+	case KeyTypeOKP:
+		if IsPrivate(v) {
+			if _, err := PrivateKey(v); err != nil {
+				return err
+			}
+		} else if _, err := PublicKey(v); err != nil {
+			return err
+		}
+	case KeyTypeOct:
+		if _, err := member(v, K); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("unknown key type %q", v[KeyType])
@@ -313,54 +325,17 @@ func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error
 }
 
 // ECDSAPublicKey returns the ECDSA public key and blinding value, or an error
-// if the key is not an ECDSA public key.
+// if the key is not an ECDSA public key or its point is not on its curve.
+// The blinding value is always nil and is kept for compatibility.
 func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err error) {
-	crv, xEnc, yEnc, err := ECDSAValues(v)
+	if v[KeyType] != KeyTypeEC {
+		return nil, nil, fmt.Errorf("failed to get ECDSA values for public key: JWK value is not EC")
+	}
+	curve, _, point, err := ecPoint(v)
 	if err != nil {
-		err = fmt.Errorf("failed to get ECDSA values for public key: %w", err)
-		return
+		return nil, nil, fmt.Errorf("failed to get ECDSA public key: %w", err)
 	}
-
-	pkey = &ecdsa.PublicKey{}
-
-	switch crv {
-	case "P-224":
-		pkey.Curve = elliptic.P224()
-	case "P-256":
-		pkey.Curve = elliptic.P256()
-	case "P-384":
-		pkey.Curve = elliptic.P384()
-	case "P-521":
-		pkey.Curve = elliptic.P521()
-	default:
-		err = fmt.Errorf("invalid curve %q while getting ECDSA values for public key", crv)
-		return
-	}
-
-	var (
-		x = new(big.Int)
-		y = new(big.Int)
-	)
-
-	xBytes, err := base64.Decode(xEnc)
-	if err != nil {
-		err = fmt.Errorf("failed to decode ECDSA public key X: %w", err)
-		return
-	}
-	x.SetBytes(xBytes)
-
-	pkey.X = x
-
-	yBytes, err := base64.Decode(yEnc)
-	if err != nil {
-		err = fmt.Errorf("failed to decode ECDSA public key Y: %w", err)
-		return
-	}
-	y.SetBytes(yBytes)
-
-	pkey.Y = y
-
-	return
+	return ecdsaFromPoint(curve, point), nil, nil
 }
 
 // Ed25519PublicKey returns the Ed25519 public key, or an error if the
@@ -389,72 +364,23 @@ func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
 	return
 }
 
-// ValueFromPublicKey returns a JWK value from the given public key.
+// ValueFromPublicKey returns a JWK value from the given public key, with
+// "use" set to "sig". EC coordinates are encoded at the full width of their
+// curve, as https://www.rfc-editor.org/rfc/rfc7518.html#section-6.2.1.2
+// requires, so thumbprints match other implementations. Use [PublicValue]
+// for a key without a "use" member.
 func ValueFromPublicKey(pubKey any) (Value, error) {
-	switch pubKey := pubKey.(type) {
-	case *rsa.PublicKey:
-		n, err := base64.Encode(pubKey.N.Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode RSA modulus: %w", err)
-		}
-		e, err := base64.Encode(big.NewInt(int64(pubKey.E)).Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode RSA exponent: %w", err)
-		}
-
-		value := Value{
-			KeyType:      "RSA",
-			PublicKeyUse: "sig",
-			N:            n,
-			E:            e,
-		}
-
-		return value, nil
-	case *ecdsa.PublicKey:
-		var crv string
-		switch pubKey.Curve {
-		case elliptic.P224():
-			crv = "P-224"
-		case elliptic.P256():
-			crv = "P-256"
-		case elliptic.P384():
-			crv = "P-384"
-		case elliptic.P521():
-			crv = "P-521"
-		default:
-			return nil, fmt.Errorf("invalid curve %q used for JWK value", pubKey.Curve)
-		}
-
-		x, err := base64.Encode(pubKey.X.Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode ECDSA X coordinate: %w", err)
-		}
-		y, err := base64.Encode(pubKey.Y.Bytes())
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode ECDSA Y coordinate: %w", err)
-		}
-
-		return Value{
-			KeyType:      "EC",
-			PublicKeyUse: "sig",
-			Curve:        crv,
-			X:            x,
-			Y:            y,
-		}, nil
-	case ed25519.PublicKey:
-		x, err := base64.Encode(pubKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode Ed25519 public key: %w", err)
-		}
-		return Value{
-			KeyType:      "OKP",
-			PublicKeyUse: "sig",
-			Curve:        "Ed25519",
-			X:            x,
-		}, nil
+	switch pubKey.(type) {
+	case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
 	default:
 		return nil, fmt.Errorf("invalid type %T used for JWK value", pubKey)
 	}
+	value, err := PublicValue(pubKey)
+	if err != nil {
+		return nil, err
+	}
+	value[PublicKeyUse] = "sig"
+	return value, nil
 }
 
 // Set is a JWK set as defined in RFC 7517.
