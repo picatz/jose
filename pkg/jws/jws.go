@@ -8,6 +8,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
+	_ "crypto/sha256" // SHA-256 for HS256, RS256, PS256 and ES256
+	_ "crypto/sha512" // SHA-384 and SHA-512 for the 384 and 512 variants
 	"encoding/asn1"
 	"encoding/json"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -278,8 +281,24 @@ func (t *Signature) Sign(key any) ([]byte, error) {
 		return nil, fmt.Errorf("failed to compute signing input: %w", err)
 	}
 
-	var signature []byte
+	signature, err := t.signInput(alg, key, signingInput)
+	if err != nil {
+		return nil, err
+	}
 
+	t.Signature = signature
+	// Clear cached raw representation since signature changed
+	t.raw = ""
+
+	return signature, nil
+}
+
+// signInput signs signingInput with key under alg.
+func (t *Signature) signInput(alg jwa.Algorithm, key any, signingInput string) ([]byte, error) {
+	var (
+		signature []byte
+		err       error
+	)
 	switch alg {
 	case jwa.HS256:
 		signature, err = t.hmacSign(crypto.SHA256, key, signingInput)
@@ -317,28 +336,24 @@ func (t *Signature) Sign(key any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign with %s: %w", alg, err)
 	}
-
-	t.Signature = signature
-	// Clear cached raw representation since signature changed
-	t.raw = ""
-
 	return signature, nil
 }
 
 // Verify verifies the JWS signature using the given key.
 // Returns nil if the signature is valid, error otherwise.
+//
+// An unsecured JWS ("alg" "none") never verifies: it carries no signature,
+// so accepting it would let anyone forge content
+// (https://www.rfc-editor.org/rfc/rfc8725.html#section-3.1). Callers that
+// deliberately accept unsecured content can check the header themselves.
 func (t *Signature) Verify(key any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
 		return fmt.Errorf("missing or invalid algorithm in header: %w", err)
 	}
 
-	// Special handling for "none" algorithm
 	if alg == jwa.None {
-		if len(t.Signature) != 0 {
-			return fmt.Errorf("signature must be empty for algorithm %q", alg)
-		}
-		return nil
+		return fmt.Errorf("unsecured JWS (alg %q) has no signature to verify", alg)
 	}
 
 	if key == nil {
@@ -382,8 +397,12 @@ func (t *Signature) Verify(key any) error {
 	}
 }
 
-// parseHeaderStrict implements strict JSON parsing as required by RFC 7515 Section 10.12
+// parseHeaderStrict parses a JOSE Header, refusing duplicate parameter
+// names (RFC 7515 §4) so every verifier reads the same "alg".
 func parseHeaderStrict(data []byte) (Header, error) {
+	if err := strictjson.CheckDuplicates(data); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
 	var header Header
 	if err := json.Unmarshal(data, &header); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)

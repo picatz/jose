@@ -112,7 +112,8 @@ func ExampleNew_emptyPayload() {
 	fmt.Println("Empty payload signature verified!")
 }
 
-// ExampleNew_unsecured demonstrates unsecured JWS (algorithm "none")
+// ExampleNew_unsecured shows an unsecured JWS (algorithm "none"), which
+// can be created but never verifies.
 func ExampleNew_unsecured() {
 	header := jws.Header{
 		header.Algorithm: jwa.None,
@@ -127,15 +128,44 @@ func ExampleNew_unsecured() {
 
 	fmt.Printf("Unsecured JWS: %s\n", token.String())
 
-	// Verify (no key needed for "none" algorithm)
-	err = token.Verify(nil)
+	// An unsecured JWS carries no signature, so Verify always refuses it.
+	if err := token.Verify(nil); err != nil {
+		fmt.Println("Verify refused it:", err)
+	}
+
+	// Output:
+	// Unsecured JWS: eyJhbGciOiJub25lIn0.VGhpcyBtZXNzYWdlIGhhcyBubyBzaWduYXR1cmU.
+	// Verify refused it: unsecured JWS (alg "none") has no signature to verify
+}
+
+// ExampleSignJSON signs one payload for two verifiers and checks it the way
+// a receiver holding only one of the keys would.
+func ExampleSignJSON() {
+	current := []byte("current-key-of-at-least-32-bytes")
+	next := []byte("next-key-also-at-least-32-bytes!")
+
+	signed, err := jws.SignJSON([]byte(`{"hello":"world"}`),
+		jws.JSONSigner{Protected: jws.Header{header.Algorithm: jwa.HS256, header.KeyID: "current"}, Key: current},
+		jws.JSONSigner{Protected: jws.Header{header.Algorithm: jwa.HS256, header.KeyID: "next"}, Key: next},
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	general, err := signed.General()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Unsecured JWS verified!")
+	received, err := jws.ParseJSON(general)
+	if err != nil {
+		log.Fatal(err)
+	}
+	index, err := received.Verify(next)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(received.Signatures[index].Protected[header.KeyID], string(received.Payload))
 
 	// Output:
-	// Unsecured JWS: eyJhbGciOiJub25lIn0.VGhpcyBtZXNzYWdlIGhhcyBubyBzaWduYXR1cmU.
-	// Unsecured JWS verified!
+	// next {"hello":"world"}
 }

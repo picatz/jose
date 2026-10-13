@@ -149,6 +149,14 @@ func TestJWSBasicFlow(t *testing.T) {
 				t.Fatalf("parsedSignature.Signature = %x, want %x", parsedSignature.Signature, signature.Signature)
 			}
 
+			// An unsecured JWS never verifies (RFC 8725 §3.1).
+			if tt.algorithm == jwa.None {
+				if err := parsedSignature.Verify(verificationKey); err == nil {
+					t.Fatal("parsedSignature.Verify() accepted alg none")
+				}
+				return
+			}
+
 			// Verify signature
 			err = parsedSignature.Verify(verificationKey)
 			if err != nil {
