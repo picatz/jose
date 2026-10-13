@@ -89,6 +89,24 @@ type Token struct {
 //   - ES256, ES384, ES512: *ecdsa.PrivateKey
 //   - EdDSA: ed25519.PrivateKey
 func New[T jwa.SigningKey](params header.Parameters, claims ClaimsSet, key T) (*Token, error) {
+	return newToken(params, claims, key)
+}
+
+// NewWithSigner is like [New], but signs with a [crypto.Signer], such as a
+// hardware-backed PIV, TPM or Secure Enclave key, or a remote KMS key.
+//
+// The "alg" header parameter must match the signer's public key: ES256,
+// ES384 or ES512 for P-256, P-384 or P-521; RS* or PS* for RSA keys of at
+// least 2048 bits; EdDSA for Ed25519. [jwa.ForKey] picks the conventional
+// algorithm for a public key.
+func NewWithSigner(params header.Parameters, claims ClaimsSet, signer crypto.Signer) (*Token, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("cannot create token with a nil signer")
+	}
+	return newToken(params, claims, signer)
+}
+
+func newToken(params header.Parameters, claims ClaimsSet, key any) (*Token, error) {
 	// Given params set cannot be empty.
 	if len(params) == 0 {
 		return nil, fmt.Errorf("cannot create token with empty header parameters")
@@ -966,7 +984,15 @@ func (t *Token) EdDSASignature(privateKey ed25519.PrivateKey) ([]byte, error) {
 	return jwsToken.SignEdDSA(privateKey, signingInput)
 }
 
-// Sign returns the signature of the token using the given options.
+// Sign signs the token with key, sets its Signature and returns it.
+//
+// The "alg" header parameter selects the algorithm. HMAC algorithms take a
+// []byte or string secret. Asymmetric algorithms take any [crypto.Signer]
+// whose public key matches the algorithm, including hardware-backed signers;
+// see [jws.Signature.Sign] for the exact key requirements.
+//
+// Sign always covers the current Header and Claims, even when the token was
+// parsed from a string.
 func (t *Token) Sign(key any) ([]byte, error) {
 	typ, err := t.Header.Type()
 	if err != nil {
@@ -982,127 +1008,27 @@ func (t *Token) Sign(key any) ([]byte, error) {
 		return nil, fmt.Errorf("missing JWT header algorithm: %w", err)
 	}
 
+	// Never sign the encoding a parsed token arrived with.
+	t.raw = ""
+
 	switch alg {
-	case jwa.HS256:
-		sig, err := t.HMACSignature(crypto.SHA256, key)
+	case jwa.HS256, jwa.HS384, jwa.HS512:
+		sig, err := t.HMACSignature(algHash[alg], key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
-	case jwa.HS384:
-		sig, err := t.HMACSignature(crypto.SHA384, key)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.HS512:
-		sig, err := t.HMACSignature(crypto.SHA512, key)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.ES256:
-		privateKey, ok := key.(*ecdsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA256", key)
-		}
-		sig, err := t.ECDSASignature(crypto.SHA256, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.ES384:
-		privateKey, ok := key.(*ecdsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA384", key)
-		}
-		sig, err := t.ECDSASignature(crypto.SHA384, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.ES512:
-		privateKey, ok := key.(*ecdsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for ECDSA SHA512", key)
-		}
-		sig, err := t.ECDSASignature(crypto.SHA512, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.PS256:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
-		}
-		sig, err := t.RSAPSSSignature(crypto.SHA256, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.PS384:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA384", key)
-		}
-		sig, err := t.RSAPSSSignature(crypto.SHA384, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.PS512:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA512", key)
-		}
-		sig, err := t.RSAPSSSignature(crypto.SHA512, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.RS256:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA256", key)
-		}
-		sig, err := t.RSASignature(crypto.SHA256, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.RS384:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA384", key)
-		}
-		sig, err := t.RSASignature(crypto.SHA384, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.RS512:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for RSA SHA512", key)
-		}
-		sig, err := t.RSASignature(crypto.SHA512, privateKey)
-		if err != nil {
-			return nil, err
-		}
-		t.Signature = sig
-	case jwa.EdDSA:
-		privateKey, ok := key.(ed25519.PrivateKey)
-		if !ok {
-			return nil, fmt.Errorf("invalid secret key type %T for EdDSA", key)
-		}
-		sig, err := t.EdDSASignature(privateKey)
+	case jwa.ES256, jwa.ES384, jwa.ES512,
+		jwa.RS256, jwa.RS384, jwa.RS512,
+		jwa.PS256, jwa.PS384, jwa.PS512,
+		jwa.EdDSA:
+		sig, err := t.asymmetricSignature(alg, key)
 		if err != nil {
 			return nil, err
 		}
 		t.Signature = sig
 	case jwa.None:
-		// no signature
+		t.Signature = nil
 	default:
 		return nil, fmt.Errorf("algorithm %q not implemented", alg)
 	}
@@ -1113,6 +1039,34 @@ func (t *Token) Sign(key any) ([]byte, error) {
 	}
 
 	return t.Signature, nil
+}
+
+// asymmetricSignature signs the token with a crypto.Signer through the shared
+// JWS implementation.
+func (t *Token) asymmetricSignature(alg jwa.Algorithm, key any) ([]byte, error) {
+	jwsToken, err := t.asJWS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create JWS instance: %w", err)
+	}
+
+	signingInput, err := t.signingInput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signing input: %w", err)
+	}
+
+	hash := algHash[alg]
+	switch alg {
+	case jwa.ES256, jwa.ES384, jwa.ES512:
+		return jwsToken.SignECDSA(hash, key, signingInput)
+	case jwa.RS256, jwa.RS384, jwa.RS512:
+		return jwsToken.SignRSA(hash, key, signingInput)
+	case jwa.PS256, jwa.PS384, jwa.PS512:
+		return jwsToken.SignRSAPSS(hash, key, signingInput)
+	case jwa.EdDSA:
+		return jwsToken.SignEdDSA(key, signingInput)
+	default:
+		return nil, fmt.Errorf("algorithm %q is not asymmetric", alg)
+	}
 }
 
 var defaultAllowedAlgorithms = []jwa.Algorithm{
