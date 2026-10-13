@@ -9,7 +9,6 @@ import (
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/stretchr/testify/require"
 )
 
 func must[T any](value T, err error) T {
@@ -76,12 +75,18 @@ func TestRFC7519Compliance(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				_, err := jwt.ParseString(tt.input)
 				if tt.shouldError {
-					require.Error(t, err)
+					if err == nil {
+						t.Fatal("jwt.ParseString() error = nil, want non-nil")
+					}
 					if tt.errorCheck != nil {
-						require.True(t, tt.errorCheck(err), "Error check failed for: %v", err)
+						if !tt.errorCheck(err) {
+							t.Fatalf("error check failed for: %v", err)
+						}
 					}
 				} else {
-					require.NoError(t, err)
+					if err != nil {
+						t.Fatalf("jwt.ParseString() error = %v", err)
+					}
 				}
 			})
 		}
@@ -122,8 +127,9 @@ func TestRFC7519Compliance(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				jwtString := tt.header + "." + tt.payload + "." + tt.signature
 				_, err := jwt.ParseString(jwtString)
-				require.Error(t, err)
-				require.Contains(t, err.Error(), tt.expectedErr)
+				if err == nil || !strings.Contains(err.Error(), tt.expectedErr) {
+					t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, tt.expectedErr)
+				}
 			})
 		}
 	})
@@ -165,8 +171,9 @@ func TestRFC7519Compliance(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				jwtString := tt.header + "." + tt.payload + "."
 				_, err := jwt.ParseString(jwtString)
-				require.Error(t, err)
-				require.Contains(t, err.Error(), tt.expectedErr)
+				if err == nil || !strings.Contains(err.Error(), tt.expectedErr) {
+					t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, tt.expectedErr)
+				}
 			})
 		}
 	})
@@ -207,17 +214,24 @@ func TestRFC7519Compliance(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
 				header, err := base64.Encode([]byte(`{"alg":"none"}`))
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
 				payload, err := base64.Encode([]byte(test.claims))
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
 				jwtString := header + "." + payload + "."
 
 				_, err = jwt.ParseString(jwtString)
 				if test.expectedErr != "" {
-					require.Error(t, err)
-					require.Contains(t, err.Error(), test.expectedErr)
+					if err == nil || !strings.Contains(err.Error(), test.expectedErr) {
+						t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, test.expectedErr)
+					}
 				} else {
-					require.NoError(t, err)
+					if err != nil {
+						t.Fatalf("jwt.ParseString() error = %v", err)
+					}
 				}
 			})
 		}
@@ -238,13 +252,21 @@ func TestSecurityEdgeCases(t *testing.T) {
 				name:        "Missing algorithm header",
 				headerJson:  `{"typ":"JWT"}`,
 				shouldError: true,
-				errorCheck:  func(t *testing.T, err error) { require.ErrorIs(t, err, jwt.ErrInvalidToken) },
+				errorCheck: func(t *testing.T, err error) {
+					if !errors.Is(err, jwt.ErrInvalidToken) {
+						t.Fatalf("error = %v, want %v", err, jwt.ErrInvalidToken)
+					}
+				},
 			},
 			{
 				name:        "Null algorithm header",
 				headerJson:  `{"alg":null,"typ":"JWT"}`,
 				shouldError: true,
-				errorCheck:  func(t *testing.T, err error) { require.ErrorIs(t, err, jwt.ErrInvalidToken) },
+				errorCheck: func(t *testing.T, err error) {
+					if !errors.Is(err, jwt.ErrInvalidToken) {
+						t.Fatalf("error = %v, want %v", err, jwt.ErrInvalidToken)
+					}
+				},
 			},
 			{
 				name:        "Case sensitivity in algorithm",
@@ -256,9 +278,13 @@ func TestSecurityEdgeCases(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				header, err := base64.Encode([]byte(tt.headerJson))
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
 				payload, err := base64.Encode([]byte(`{"sub":"test"}`))
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
 				jwtString := header + "." + payload + "."
 
 				token, parseErr := jwt.ParseString(jwtString)
@@ -266,7 +292,9 @@ func TestSecurityEdgeCases(t *testing.T) {
 					tt.errorCheck(t, parseErr)
 					return
 				}
-				require.NoError(t, parseErr)
+				if parseErr != nil {
+					t.Fatalf("jwt.ParseString() error = %v", parseErr)
+				}
 
 				// Test verification
 				if tt.name == "Case sensitivity in algorithm" {
@@ -276,12 +304,16 @@ func TestSecurityEdgeCases(t *testing.T) {
 					err = token.Verify(jwt.WithKey(testHMACSecretKey))
 				}
 				if tt.shouldError {
-					require.Error(t, err)
+					if err == nil {
+						t.Fatal("token.Verify() error = nil, want non-nil")
+					}
 					if tt.errorCheck != nil {
 						tt.errorCheck(t, err)
 					}
 				} else {
-					require.NoError(t, err)
+					if err != nil {
+						t.Fatalf("token.Verify() error = %v", err)
+					}
 				}
 			})
 		}
@@ -305,12 +337,18 @@ func TestSecurityEdgeCases(t *testing.T) {
 
 		// Parse the large token
 		parsed, err := jwt.ParseString(token.String())
-		require.NoError(t, err)
-		require.NotNil(t, parsed)
+		if err != nil {
+			t.Fatalf("jwt.ParseString() error = %v", err)
+		}
+		if parsed == nil {
+			t.Fatal("parsed = nil, want non-nil")
+		}
 
 		// Verify it
 		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("parsed.Verify() error = %v", err)
+		}
 	})
 
 	t.Run("Unicode and Special Characters", func(t *testing.T) {
@@ -333,12 +371,20 @@ func TestSecurityEdgeCases(t *testing.T) {
 
 		// Parse and verify
 		parsed, err := jwt.ParseString(token.String())
-		require.NoError(t, err)
-		require.Equal(t, claims[jwt.Subject], parsed.Claims[jwt.Subject])
-		require.Equal(t, claims[jwt.Issuer], parsed.Claims[jwt.Issuer])
+		if err != nil {
+			t.Fatalf("jwt.ParseString() error = %v", err)
+		}
+		if parsed.Claims[jwt.Subject] != claims[jwt.Subject] {
+			t.Fatalf("parsed.Claims[jwt.Subject] = %v, want %v", parsed.Claims[jwt.Subject], claims[jwt.Subject])
+		}
+		if parsed.Claims[jwt.Issuer] != claims[jwt.Issuer] {
+			t.Fatalf("parsed.Claims[jwt.Issuer] = %v, want %v", parsed.Claims[jwt.Issuer], claims[jwt.Issuer])
+		}
 
 		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("parsed.Verify() error = %v", err)
+		}
 	})
 
 	t.Run("Empty and Whitespace Claims", func(t *testing.T) {
@@ -359,12 +405,20 @@ func TestSecurityEdgeCases(t *testing.T) {
 		)
 
 		parsed, err := jwt.ParseString(token.String())
-		require.NoError(t, err)
-		require.Equal(t, "", parsed.Claims[jwt.Subject])
-		require.Equal(t, "   ", parsed.Claims[jwt.Issuer])
+		if err != nil {
+			t.Fatalf("jwt.ParseString() error = %v", err)
+		}
+		if parsed.Claims[jwt.Subject] != "" {
+			t.Fatalf("parsed.Claims[jwt.Subject] = %q, want %q", parsed.Claims[jwt.Subject], "")
+		}
+		if parsed.Claims[jwt.Issuer] != "   " {
+			t.Fatalf("parsed.Claims[jwt.Issuer] = %q, want %q", parsed.Claims[jwt.Issuer], "   ")
+		}
 
 		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("parsed.Verify() error = %v", err)
+		}
 	})
 }
 
@@ -433,12 +487,18 @@ func TestNoneAlgorithmCompliance(t *testing.T) {
 
 				err := token.Verify(opts...)
 				if tt.shouldError {
-					require.Error(t, err)
+					if err == nil {
+						t.Fatal("token.Verify() error = nil, want non-nil")
+					}
 					if tt.errorCheck != nil {
-						require.True(t, tt.errorCheck(err), "Error check failed for: %v", err)
+						if !tt.errorCheck(err) {
+							t.Fatalf("error check failed for: %v", err)
+						}
 					}
 				} else {
-					require.NoError(t, err)
+					if err != nil {
+						t.Fatalf("token.Verify() error = %v", err)
+					}
 				}
 			})
 		}

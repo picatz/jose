@@ -2,13 +2,14 @@ package header_test
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/stretchr/testify/require"
 )
 
 func TestJSONDecode(t *testing.T) {
@@ -22,12 +23,20 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":"JWT","alg":"HS256"}`,
 			check: func(t *testing.T, params header.Parameters) {
 				typ, err := params.Type()
-				require.NoError(t, err)
-				require.Equal(t, jwt.Type, typ)
+				if err != nil {
+					t.Fatalf("params.Type() error = %v", err)
+				}
+				if typ != jwt.Type {
+					t.Fatalf("typ = %v, want %v", typ, jwt.Type)
+				}
 
 				alg, err := params.Algorithm()
-				require.NoError(t, err)
-				require.Equal(t, jwa.HS256, alg)
+				if err != nil {
+					t.Fatalf("params.Algorithm() error = %v", err)
+				}
+				if alg != jwa.HS256 {
+					t.Fatalf("alg = %v, want %v", alg, jwa.HS256)
+				}
 			},
 		},
 		{
@@ -35,16 +44,28 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":"JWT","alg":"HS256","kid":"key-id"}`,
 			check: func(t *testing.T, params header.Parameters) {
 				typ, err := params.Type()
-				require.NoError(t, err)
-				require.Equal(t, jwt.Type, typ)
+				if err != nil {
+					t.Fatalf("params.Type() error = %v", err)
+				}
+				if typ != jwt.Type {
+					t.Fatalf("typ = %v, want %v", typ, jwt.Type)
+				}
 
 				alg, err := params.Algorithm()
-				require.NoError(t, err)
-				require.Equal(t, jwa.HS256, alg)
+				if err != nil {
+					t.Fatalf("params.Algorithm() error = %v", err)
+				}
+				if alg != jwa.HS256 {
+					t.Fatalf("alg = %v, want %v", alg, jwa.HS256)
+				}
 
 				kid, err := params.Get(header.KeyID)
-				require.NoError(t, err)
-				require.Equal(t, "key-id", kid)
+				if err != nil {
+					t.Fatalf("params.Get() error = %v", err)
+				}
+				if kid != "key-id" {
+					t.Fatalf("kid = %q, want %q", kid, "key-id")
+				}
 			},
 		},
 		{
@@ -52,20 +73,36 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":"JWT","alg":"HS256","kid":"key-id","crit":["exp","nbf"]}`,
 			check: func(t *testing.T, params header.Parameters) {
 				typ, err := params.Type()
-				require.NoError(t, err)
-				require.Equal(t, jwt.Type, typ)
+				if err != nil {
+					t.Fatalf("params.Type() error = %v", err)
+				}
+				if typ != jwt.Type {
+					t.Fatalf("typ = %v, want %v", typ, jwt.Type)
+				}
 
 				alg, err := params.Algorithm()
-				require.NoError(t, err)
-				require.Equal(t, jwa.HS256, alg)
+				if err != nil {
+					t.Fatalf("params.Algorithm() error = %v", err)
+				}
+				if alg != jwa.HS256 {
+					t.Fatalf("alg = %v, want %v", alg, jwa.HS256)
+				}
 
 				kid, err := params.Get(header.KeyID)
-				require.NoError(t, err)
-				require.Equal(t, "key-id", kid)
+				if err != nil {
+					t.Fatalf("params.Get() error = %v", err)
+				}
+				if kid != "key-id" {
+					t.Fatalf("kid = %q, want %q", kid, "key-id")
+				}
 
 				crit, err := params.Get(header.Critical)
-				require.NoError(t, err)
-				require.Equal(t, []any{"exp", "nbf"}, crit)
+				if err != nil {
+					t.Fatalf("params.Get() error = %v", err)
+				}
+				if !reflect.DeepEqual(crit, []any{"exp", "nbf"}) {
+					t.Fatalf("crit = %v, want %v", crit, []any{"exp", "nbf"})
+				}
 			},
 		},
 		{
@@ -73,9 +110,12 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"alg":"HS256"}`,
 			check: func(t *testing.T, params header.Parameters) {
 				typ, err := params.Type()
-				require.Error(t, err)
-				require.ErrorIs(t, err, header.ErrParameterNotFound)
-				require.Equal(t, "", typ)
+				if !errors.Is(err, header.ErrParameterNotFound) {
+					t.Fatalf("params.Type() error = %v, want %v", err, header.ErrParameterNotFound)
+				}
+				if typ != "" {
+					t.Fatalf("typ = %q, want %q", typ, "")
+				}
 			},
 		},
 		{
@@ -83,9 +123,12 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":"JWT"}`,
 			check: func(t *testing.T, params header.Parameters) {
 				alg, err := params.Algorithm()
-				require.Error(t, err)
-				require.ErrorIs(t, err, header.ErrParameterNotFound)
-				require.Equal(t, "", alg)
+				if !errors.Is(err, header.ErrParameterNotFound) {
+					t.Fatalf("params.Algorithm() error = %v, want %v", err, header.ErrParameterNotFound)
+				}
+				if alg != "" {
+					t.Fatalf("alg = %q, want %q", alg, "")
+				}
 			},
 		},
 		{
@@ -93,9 +136,12 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":123,"alg":"HS256"}`,
 			check: func(t *testing.T, params header.Parameters) {
 				typ, err := params.Type()
-				require.Error(t, err)
-				require.ErrorIs(t, err, header.ErrInvalidParameterType)
-				require.Equal(t, "", typ)
+				if !errors.Is(err, header.ErrInvalidParameterType) {
+					t.Fatalf("params.Type() error = %v, want %v", err, header.ErrInvalidParameterType)
+				}
+				if typ != "" {
+					t.Fatalf("typ = %q, want %q", typ, "")
+				}
 			},
 		},
 		{
@@ -103,9 +149,12 @@ func TestJSONDecode(t *testing.T) {
 			input: `{"typ":"JWT","alg":123}`,
 			check: func(t *testing.T, params header.Parameters) {
 				alg, err := params.Algorithm()
-				require.Error(t, err)
-				require.ErrorIs(t, err, header.ErrInvalidParameterType)
-				require.Equal(t, "", alg)
+				if !errors.Is(err, header.ErrInvalidParameterType) {
+					t.Fatalf("params.Algorithm() error = %v, want %v", err, header.ErrInvalidParameterType)
+				}
+				if alg != "" {
+					t.Fatalf("alg = %q, want %q", alg, "")
+				}
 			},
 		},
 	}
@@ -114,7 +163,9 @@ func TestJSONDecode(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var params header.Parameters
 			err := json.NewDecoder(strings.NewReader(test.input)).Decode(&params)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
 
 			test.check(t, params)
 		})

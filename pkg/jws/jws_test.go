@@ -1,16 +1,18 @@
 package jws
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
-	"github.com/stretchr/testify/require"
 )
 
 func TestJWSBasicFlow(t *testing.T) {
@@ -32,7 +34,9 @@ func TestJWSBasicFlow(t *testing.T) {
 			algorithm: jwa.RS256,
 			keyGen: func() (any, any) {
 				key, err := rsa.GenerateKey(rand.Reader, 2048)
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("rsa.GenerateKey() error = %v", err)
+				}
 				return key, &key.PublicKey
 			},
 		},
@@ -41,7 +45,9 @@ func TestJWSBasicFlow(t *testing.T) {
 			algorithm: jwa.ES256,
 			keyGen: func() (any, any) {
 				key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("ecdsa.GenerateKey() error = %v", err)
+				}
 				return key, &key.PublicKey
 			},
 		},
@@ -50,7 +56,9 @@ func TestJWSBasicFlow(t *testing.T) {
 			algorithm: jwa.EdDSA,
 			keyGen: func() (any, any) {
 				pub, priv, err := ed25519.GenerateKey(rand.Reader)
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("ed25519.GenerateKey() error = %v", err)
+				}
 				return priv, pub
 			},
 		},
@@ -78,23 +86,37 @@ func TestJWSBasicFlow(t *testing.T) {
 
 			// Create and sign JWS signature
 			signature, err := New(h, payload, signingKey)
-			require.NoError(t, err)
-			require.NotNil(t, signature)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if signature == nil {
+				t.Fatal("signature = nil, want non-nil")
+			}
 
 			// Verify the structure
-			require.Equal(t, h, signature.Header)
-			require.Equal(t, payload, signature.Payload)
+			if !reflect.DeepEqual(signature.Header, h) {
+				t.Fatalf("signature.Header = %v, want %v", signature.Header, h)
+			}
+			if !bytes.Equal(signature.Payload, payload) {
+				t.Fatalf("signature.Payload = %x, want %x", signature.Payload, payload)
+			}
 
 			// For "none" algorithm, signature should be empty
 			if tt.algorithm == jwa.None {
-				require.Empty(t, signature.Signature)
+				if len(signature.Signature) != 0 {
+					t.Fatalf("signature.Signature = %v, want empty", signature.Signature)
+				}
 			} else {
-				require.NotEmpty(t, signature.Signature)
+				if len(signature.Signature) == 0 {
+					t.Fatal("signature.Signature is empty")
+				}
 			}
 
 			// Test string representation
 			signatureStr := signature.String()
-			require.NotEmpty(t, signatureStr)
+			if len(signatureStr) == 0 {
+				t.Fatal("signatureStr is empty")
+			}
 
 			// Count periods - should be exactly 2
 			periods := 0
@@ -103,25 +125,41 @@ func TestJWSBasicFlow(t *testing.T) {
 					periods++
 				}
 			}
-			require.Equal(t, 2, periods, "JWS should have exactly 2 periods")
+			if periods != 2 {
+				t.Fatalf("JWS %q has %d periods, want 2", signatureStr, periods)
+			}
 
 			// Parse the signature back
 			parsedSignature, err := Parse(signatureStr)
-			require.NoError(t, err)
-			require.NotNil(t, parsedSignature)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if parsedSignature == nil {
+				t.Fatal("parsedSignature = nil, want non-nil")
+			}
 
 			// Verify parsed signature matches original
-			require.Equal(t, signature.Header, parsedSignature.Header)
-			require.Equal(t, signature.Payload, parsedSignature.Payload)
-			require.Equal(t, signature.Signature, parsedSignature.Signature)
+			if !reflect.DeepEqual(parsedSignature.Header, signature.Header) {
+				t.Fatalf("parsedSignature.Header = %v, want %v", parsedSignature.Header, signature.Header)
+			}
+			if !bytes.Equal(parsedSignature.Payload, signature.Payload) {
+				t.Fatalf("parsedSignature.Payload = %x, want %x", parsedSignature.Payload, signature.Payload)
+			}
+			if !bytes.Equal(parsedSignature.Signature, signature.Signature) {
+				t.Fatalf("parsedSignature.Signature = %x, want %x", parsedSignature.Signature, signature.Signature)
+			}
 
 			// Verify signature
 			err = parsedSignature.Verify(verificationKey)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("parsedSignature.Verify() error = %v", err)
+			}
 
 			// Test signature verification with original signature
 			err = signature.Verify(verificationKey)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("signature.Verify() error = %v", err)
+			}
 		})
 	}
 }
@@ -129,40 +167,47 @@ func TestJWSBasicFlow(t *testing.T) {
 func TestJWSParsing(t *testing.T) {
 	t.Run("empty string", func(t *testing.T) {
 		_, err := Parse("")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "empty JWS string")
+		if err == nil || !strings.Contains(err.Error(), "empty JWS string") {
+			t.Fatalf("Parse() error = %v, want error containing %q", err, "empty JWS string")
+		}
 	})
 
 	t.Run("invalid format - too few parts", func(t *testing.T) {
 		_, err := Parse("header.payload")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "expected 2 dots, got 1")
+		if err == nil || !strings.Contains(err.Error(), "expected 2 dots, got 1") {
+			t.Fatalf("Parse() error = %v, want error containing %q", err, "expected 2 dots, got 1")
+		}
 	})
 
 	t.Run("invalid format - too many parts", func(t *testing.T) {
 		_, err := Parse("header.payload.signature.extra")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "expected 2 dots, got 3")
+		if err == nil || !strings.Contains(err.Error(), "expected 2 dots, got 3") {
+			t.Fatalf("Parse() error = %v, want error containing %q", err, "expected 2 dots, got 3")
+		}
 	})
 
 	t.Run("invalid base64 header", func(t *testing.T) {
 		_, err := Parse("invalid-base64!.payload.signature")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to decode header")
+		if err == nil || !strings.Contains(err.Error(), "failed to decode header") {
+			t.Fatalf("Parse() error = %v, want error containing %q", err, "failed to decode header")
+		}
 	})
 
 	t.Run("invalid JSON header", func(t *testing.T) {
 		invalidHeader := "eyJpbnZhbGlkIGpzb24=" // {"invalid json
 		_, err := Parse(invalidHeader + ".payload.signature")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to parse header")
+		if err == nil || !strings.Contains(err.Error(), "failed to parse header") {
+			t.Fatalf("Parse() error = %v, want error containing %q", err, "failed to parse header")
+		}
 	})
 }
 
 func TestJWSSignatureVerification(t *testing.T) {
 	// Generate test key
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey() error = %v", err)
+	}
 
 	h := Header{
 		header.Algorithm: jwa.RS256,
@@ -170,11 +215,15 @@ func TestJWSSignatureVerification(t *testing.T) {
 	payload := []byte("test payload")
 
 	token, err := New(h, payload, key)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
 	t.Run("valid signature", func(t *testing.T) {
 		err := token.Verify(&key.PublicKey)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 	})
 
 	t.Run("tampered signature", func(t *testing.T) {
@@ -185,15 +234,21 @@ func TestJWSSignatureVerification(t *testing.T) {
 		}
 
 		err := tamperedToken.Verify(&key.PublicKey)
-		require.Error(t, err)
+		if err == nil {
+			t.Fatal("tamperedToken.Verify() error = nil, want non-nil")
+		}
 	})
 
 	t.Run("wrong key", func(t *testing.T) {
 		wrongKey, err := rsa.GenerateKey(rand.Reader, 2048)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("rsa.GenerateKey() error = %v", err)
+		}
 
 		err = token.Verify(&wrongKey.PublicKey)
-		require.Error(t, err)
+		if err == nil {
+			t.Fatal("token.Verify() error = nil, want non-nil")
+		}
 	})
 
 	t.Run("missing algorithm", func(t *testing.T) {
@@ -203,8 +258,9 @@ func TestJWSSignatureVerification(t *testing.T) {
 		}
 
 		err := tokenWithoutAlg.Verify(&key.PublicKey)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "missing or invalid algorithm")
+		if err == nil || !strings.Contains(err.Error(), "missing or invalid algorithm") {
+			t.Fatalf("tokenWithoutAlg.Verify() error = %v, want error containing %q", err, "missing or invalid algorithm")
+		}
 	})
 }
 
@@ -222,12 +278,14 @@ func TestJWSAlgorithmSupport(t *testing.T) {
 		}
 
 		_, err := token.Sign([]byte("key"))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported algorithm")
+		if err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
+			t.Fatalf("token.Sign() error = %v, want error containing %q", err, "unsupported algorithm")
+		}
 
 		err = token.Verify([]byte("key"))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported algorithm")
+		if err == nil || !strings.Contains(err.Error(), "unsupported algorithm") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "unsupported algorithm")
+		}
 	})
 }
 
@@ -250,17 +308,25 @@ func TestJWSPayloadFlexibility(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			token, err := New(h, tc.payload, key)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
 			// Verify roundtrip
 			tokenStr := token.String()
 			parsedToken, err := Parse(tokenStr)
-			require.NoError(t, err)
-			require.Equal(t, tc.payload, parsedToken.Payload)
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			if !bytes.Equal(parsedToken.Payload, tc.payload) {
+				t.Fatalf("parsedToken.Payload = %x, want %x", parsedToken.Payload, tc.payload)
+			}
 
 			// Verify signature
 			err = parsedToken.Verify(key)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("parsedToken.Verify() error = %v", err)
+			}
 		})
 	}
 }

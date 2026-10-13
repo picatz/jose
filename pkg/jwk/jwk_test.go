@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestValueECDSA(t *testing.T) {
@@ -23,14 +21,28 @@ func TestValueECDSA(t *testing.T) {
 
 	value := Value{}
 	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
-	require.NoError(t, err)
-	require.NotEmpty(t, value)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(value) == 0 {
+		t.Fatal("value is empty")
+	}
 
-	require.Equal(t, "EC", value[KeyType])
-	require.Equal(t, "P-256", value[Curve])
-	require.Equal(t, "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU", value[X])
-	require.Equal(t, "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0", value[Y])
-	require.Equal(t, "Public key used in JWS spec Appendix A.3 example", value[KeyID])
+	if value[KeyType] != "EC" {
+		t.Fatalf("value[KeyType] = %q, want %q", value[KeyType], "EC")
+	}
+	if value[Curve] != "P-256" {
+		t.Fatalf("value[Curve] = %q, want %q", value[Curve], "P-256")
+	}
+	if value[X] != "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU" {
+		t.Fatalf("value[X] = %q, want %q", value[X], "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU")
+	}
+	if value[Y] != "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0" {
+		t.Fatalf("value[Y] = %q, want %q", value[Y], "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0")
+	}
+	if value[KeyID] != "Public key used in JWS spec Appendix A.3 example" {
+		t.Fatalf("value[KeyID] = %q, want %q", value[KeyID], "Public key used in JWS spec Appendix A.3 example")
+	}
 }
 
 func TestValueRSA(t *testing.T) {
@@ -45,16 +57,30 @@ func TestValueRSA(t *testing.T) {
 
 	value := Value{}
 	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
-	require.NoError(t, err)
-	require.NotEmpty(t, value)
-	require.Equal(t, "2011-04-29", value[KeyID])
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if len(value) == 0 {
+		t.Fatal("value is empty")
+	}
+	if value[KeyID] != "2011-04-29" {
+		t.Fatalf("value[KeyID] = %q, want %q", value[KeyID], "2011-04-29")
+	}
 
 	public, err := PublicKey(value)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("PublicKey() error = %v", err)
+	}
 	pkey, ok := public.(*rsa.PublicKey)
-	require.True(t, ok)
-	require.NotNil(t, pkey.N)
-	require.Equal(t, 65537, pkey.E)
+	if !ok {
+		t.Fatalf("public type = %T, want *rsa.PublicKey", public)
+	}
+	if pkey.N == nil {
+		t.Fatal("pkey.N = nil, want non-nil")
+	}
+	if pkey.E != 65537 {
+		t.Fatalf("pkey.E = %v, want %v", pkey.E, 65537)
+	}
 }
 
 func TestValueEd25519(t *testing.T) {
@@ -69,11 +95,17 @@ func TestValueEd25519(t *testing.T) {
 
 	value := Value{}
 	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
 
 	x, err := Ed25519Values(value)
-	require.NoError(t, err)
-	require.NotEmpty(t, x)
+	if err != nil {
+		t.Fatalf("Ed25519Values() error = %v", err)
+	}
+	if len(x) == 0 {
+		t.Fatal("x is empty")
+	}
 }
 
 func TestSet(t *testing.T) {
@@ -103,37 +135,71 @@ func TestSet(t *testing.T) {
 
 	set := Set{}
 	err := json.NewDecoder(strings.NewReader(input)).Decode(&set)
-	require.NoError(t, err)
-	require.NotEmpty(t, set)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if set.Keys == nil {
+		t.Fatal("decoded Set is empty")
+	}
 
-	require.NotZero(t, len(set.Keys))
+	if len(set.Keys) == 0 {
+		t.Fatal("len(set.Keys) = 0, want non-zero")
+	}
 	for _, key := range set.Keys {
-		require.NotEmpty(t, key[KeyType])
+		if key[KeyType] == nil || key[KeyType] == "" {
+			t.Fatal("key[KeyType] is empty")
+		}
 
 		if key[KeyType] == "oct" {
 			k, err := SymmetricKey(key)
-			require.NoError(t, err)
-			require.NotEmpty(t, k)
+			if err != nil {
+				t.Fatalf("SymmetricKey() error = %v", err)
+			}
+			if len(k) == 0 {
+				t.Fatal("k is empty")
+			}
 
 			sk, err := HMACSecretKey(key)
-			require.NoError(t, err)
-			require.NotEmpty(t, sk)
+			if err != nil {
+				t.Fatalf("HMACSecretKey() error = %v", err)
+			}
+			if len(sk) == 0 {
+				t.Fatal("sk is empty")
+			}
 		}
 
 		if key[KeyType] == "EC" {
 			crv, x, y, err := ECDSAValues(key)
-			require.NoError(t, err)
-			require.NotEmpty(t, crv)
-			require.NotEmpty(t, x)
-			require.NotEmpty(t, y)
+			if err != nil {
+				t.Fatalf("ECDSAValues() error = %v", err)
+			}
+			if len(crv) == 0 {
+				t.Fatal("crv is empty")
+			}
+			if len(x) == 0 {
+				t.Fatal("x is empty")
+			}
+			if len(y) == 0 {
+				t.Fatal("y is empty")
+			}
 
 			public, err := PublicKey(key)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("PublicKey() error = %v", err)
+			}
 			pkey, ok := public.(*ecdsa.PublicKey)
-			require.True(t, ok)
-			require.NotNil(t, pkey.X)
-			require.NotNil(t, pkey.Y)
-			require.Equal(t, pkey.Curve, elliptic.P256())
+			if !ok {
+				t.Fatalf("public type = %T, want *ecdsa.PublicKey", public)
+			}
+			if pkey.X == nil {
+				t.Fatal("pkey.X = nil, want non-nil")
+			}
+			if pkey.Y == nil {
+				t.Fatal("pkey.Y = nil, want non-nil")
+			}
+			if pkey.Curve != elliptic.P256() {
+				t.Fatalf("pkey.Curve = %v, want P-256", pkey.Curve.Params().Name)
+			}
 		}
 	}
 }
@@ -144,8 +210,9 @@ func TestErrorMessages(t *testing.T) {
 			KeyType: "RSA",
 		}
 		_, _, _, err := ECDSAValues(value)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "JWK value is not EC")
+		if err == nil || !strings.Contains(err.Error(), "JWK value is not EC") {
+			t.Fatalf("ECDSAValues() error = %v, want error containing %q", err, "JWK value is not EC")
+		}
 	})
 
 	t.Run("RSAValues with non-RSA key type", func(t *testing.T) {
@@ -153,8 +220,9 @@ func TestErrorMessages(t *testing.T) {
 			KeyType: "EC",
 		}
 		_, _, _, err := RSAValues(value)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "JWK value is not RSA")
+		if err == nil || !strings.Contains(err.Error(), "JWK value is not RSA") {
+			t.Fatalf("RSAValues() error = %v, want error containing %q", err, "JWK value is not RSA")
+		}
 	})
 
 	t.Run("SymmetricKey with no key value", func(t *testing.T) {
@@ -162,8 +230,9 @@ func TestErrorMessages(t *testing.T) {
 			K: "",
 		}
 		_, err := SymmetricKey(value)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no symmetric key value set")
+		if err == nil || !strings.Contains(err.Error(), "no symmetric key value set") {
+			t.Fatalf("SymmetricKey() error = %v, want error containing %q", err, "no symmetric key value set")
+		}
 	})
 
 	t.Run("Set.Get with non-existent key", func(t *testing.T) {
@@ -175,8 +244,9 @@ func TestErrorMessages(t *testing.T) {
 			},
 		}
 		_, err := set.Get("nonexistent")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "key \"nonexistent\" not found in set")
+		if err == nil || !strings.Contains(err.Error(), "key \"nonexistent\" not found in set") {
+			t.Fatalf("set.Get() error = %v, want error containing %q", err, "key \"nonexistent\" not found in set")
+		}
 	})
 }
 
@@ -189,7 +259,9 @@ func TestValidate(t *testing.T) {
 			Y:       "dGVzdA", // base64 encoded "test"
 		}
 		err := Validate(value)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("Validate() error = %v", err)
+		}
 	})
 
 	t.Run("invalid EC key with unsupported curve", func(t *testing.T) {
@@ -200,7 +272,8 @@ func TestValidate(t *testing.T) {
 			Y:       "dGVzdA",
 		}
 		err := Validate(value)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid curve")
+		if err == nil || !strings.Contains(err.Error(), "invalid curve") {
+			t.Fatalf("Validate() error = %v, want error containing %q", err, "invalid curve")
+		}
 	})
 }

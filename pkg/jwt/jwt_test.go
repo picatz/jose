@@ -1,6 +1,7 @@
 package jwt_test
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -16,8 +17,6 @@ import (
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
 	"github.com/picatz/jose/pkg/keyutil"
-
-	"github.com/stretchr/testify/require"
 )
 
 // keyPair is a simple struct that holds a public and private key
@@ -39,7 +38,9 @@ func testNewKeyPair[P, S any](t *testing.T, source keySource[P, S]) *keyPair[P, 
 	t.Helper()
 
 	public, private, err := source()
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("source() error = %v", err)
+	}
 
 	return &keyPair[P, S]{
 		public:  public,
@@ -81,8 +82,12 @@ func testToken(t *testing.T, params header.Parameters, claims jwt.ClaimsSet, key
 		t.Fatalf("potentially unsupported signing key type: %T", key)
 	}
 
-	require.NoError(t, err)
-	require.NotNil(t, token)
+	if err != nil {
+		t.Fatalf("jwt.New() error = %v", err)
+	}
+	if token == nil {
+		t.Fatal("token = nil, want non-nil")
+	}
 
 	return token
 }
@@ -101,19 +106,35 @@ func TestTokenString(t *testing.T) {
 
 	t.Logf("before sign: %s", token)
 
-	require.Equal(t, 1, strings.Count(token.String(), "."))
-	require.Empty(t, token.Signature)
-	require.True(t, strings.HasPrefix(token.String(), "eyJ"))
+	if strings.Count(token.String(), ".") != 1 {
+		t.Fatalf("strings.Count(token.String(), \".\") = %v, want %v", strings.Count(token.String(), "."), 1)
+	}
+	if len(token.Signature) != 0 {
+		t.Fatalf("token.Signature = %v, want empty", token.Signature)
+	}
+	if !strings.HasPrefix(token.String(), "eyJ") {
+		t.Fatalf("token.String() = %q, want prefix %q", token.String(), "eyJ")
+	}
 
 	sig, err := token.Sign(testHMACSecretKey)
-	require.NoError(t, err)
-	require.NotEmpty(t, sig)
+	if err != nil {
+		t.Fatalf("token.Sign() error = %v", err)
+	}
+	if len(sig) == 0 {
+		t.Fatal("sig is empty")
+	}
 
 	t.Logf("after sign: %s", token)
 
-	require.Equal(t, 2, strings.Count(token.String(), "."))
-	require.NotEmpty(t, token.Signature)
-	require.True(t, strings.HasPrefix(token.String(), "eyJ"))
+	if strings.Count(token.String(), ".") != 2 {
+		t.Fatalf("strings.Count(token.String(), \".\") = %v, want %v", strings.Count(token.String(), "."), 2)
+	}
+	if len(token.Signature) == 0 {
+		t.Fatal("token.Signature is empty")
+	}
+	if !strings.HasPrefix(token.String(), "eyJ") {
+		t.Fatalf("token.String() = %q, want prefix %q", token.String(), "eyJ")
+	}
 }
 
 func TestParseStringAndVerify(t *testing.T) {
@@ -165,143 +186,269 @@ func TestParseStringAndVerify(t *testing.T) {
 		{
 			name: "empty",
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.Error(t, err)
-				require.Nil(t, token)
+				if err == nil {
+					t.Fatal("ParseString() error = nil, want non-nil")
+				}
+				if token != nil {
+					t.Fatalf("token = %v, want nil", token)
+				}
 			},
 		},
 		{
 			name:  "invalid data",
 			input: "eqwfixwjwwkgjiw.ufo....",
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.Error(t, err)
-				require.Nil(t, token)
+				if err == nil {
+					t.Fatal("ParseString() error = nil, want non-nil")
+				}
+				if token != nil {
+					t.Fatalf("token = %v, want nil", token)
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims and ECDSA SHA256 signature",
 			input: ecdsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.NoError(t, err)
-				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, jwt.Type, token.Header[header.Type])
-				require.NotEmpty(t, token.Claims)
-				require.NotEmpty(t, token.Signature)
+				if err != nil {
+					t.Fatalf("ParseString() error = %v", err)
+				}
+				if token.Header[header.Algorithm] != jwa.ES256 {
+					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.ES256)
+				}
+				if token.Header[header.Type] != jwt.Type {
+					t.Fatalf("token.Header[header.Type] = %v, want %v", token.Header[header.Type], jwt.Type)
+				}
+				if len(token.Claims) == 0 {
+					t.Fatal("token.Claims is empty")
+				}
+				if len(token.Signature) == 0 {
+					t.Fatal("token.Signature is empty")
+				}
 
 				sig, err := token.ECDSASignature(crypto.SHA256, ecdsaKeyPair.private)
-				require.NoError(t, err)
-				require.NotEmpty(t, sig)
-				require.Equal(t, len(sig), len(token.Signature))
-				require.NotEqual(t, sig, token.Signature)
+				if err != nil {
+					t.Fatalf("token.ECDSASignature() error = %v", err)
+				}
+				if len(sig) == 0 {
+					t.Fatal("sig is empty")
+				}
+				if len(token.Signature) != len(sig) {
+					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
+				}
+				if bytes.Equal(sig, token.Signature) {
+					t.Fatalf("ECDSASignature() = %x, want it to differ from token.Signature", sig)
+				}
 
-				require.NoError(t, token.VerifyECDSASignature(crypto.SHA256, ecdsaKeyPair.public))
+				if err := token.VerifyECDSASignature(crypto.SHA256, ecdsaKeyPair.public); err != nil {
+					t.Fatalf("token.VerifyECDSASignature() error = %v", err)
+				}
 
-				require.NoError(t, token.Verify(jwt.WithKey(ecdsaKeyPair.public)))
+				if err := token.Verify(jwt.WithKey(ecdsaKeyPair.public)); err != nil {
+					t.Fatalf("token.Verify() error = %v", err)
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims and ECDSA SHA256 signature, but only RS256 is enabled",
 			input: ecdsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.NoError(t, err)
-				require.Equal(t, jwa.ES256, token.Header[header.Algorithm])
-				require.Equal(t, jwt.Type, token.Header[header.Type])
-				require.NotEmpty(t, token.Claims)
-				require.NotEmpty(t, token.Signature)
+				if err != nil {
+					t.Fatalf("ParseString() error = %v", err)
+				}
+				if token.Header[header.Algorithm] != jwa.ES256 {
+					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.ES256)
+				}
+				if token.Header[header.Type] != jwt.Type {
+					t.Fatalf("token.Header[header.Type] = %v, want %v", token.Header[header.Type], jwt.Type)
+				}
+				if len(token.Claims) == 0 {
+					t.Fatal("token.Claims is empty")
+				}
+				if len(token.Signature) == 0 {
+					t.Fatal("token.Signature is empty")
+				}
 
-				require.Error(t, token.Verify(jwt.WithKey(ecdsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.RS256)))
+				if err := token.Verify(jwt.WithKey(ecdsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.RS256)); err == nil {
+					t.Fatal("token.Verify() error = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims and RSA SHA256 signature",
 			input: rsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.NoError(t, err)
-				require.Equal(t, jwa.RS256, token.Header[header.Algorithm])
-				require.Equal(t, jwt.Type, token.Header[header.Type])
-				require.NotEmpty(t, token.Claims)
-				require.NotEmpty(t, token.Signature)
+				if err != nil {
+					t.Fatalf("ParseString() error = %v", err)
+				}
+				if token.Header[header.Algorithm] != jwa.RS256 {
+					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.RS256)
+				}
+				if token.Header[header.Type] != jwt.Type {
+					t.Fatalf("token.Header[header.Type] = %v, want %v", token.Header[header.Type], jwt.Type)
+				}
+				if len(token.Claims) == 0 {
+					t.Fatal("token.Claims is empty")
+				}
+				if len(token.Signature) == 0 {
+					t.Fatal("token.Signature is empty")
+				}
 
 				sig, err := token.RSASignature(crypto.SHA256, rsaKeyPair.private)
-				require.NoError(t, err)
-				require.NotEmpty(t, sig)
-				require.Equal(t, len(sig), len(token.Signature))
-				require.Equal(t, sig, token.Signature)
+				if err != nil {
+					t.Fatalf("token.RSASignature() error = %v", err)
+				}
+				if len(sig) == 0 {
+					t.Fatal("sig is empty")
+				}
+				if len(token.Signature) != len(sig) {
+					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
+				}
+				if !bytes.Equal(token.Signature, sig) {
+					t.Fatalf("token.Signature = %x, want %x", token.Signature, sig)
+				}
 
 				sigEnc, err := base64.Encode(sig)
-				require.NoError(t, err)
-				require.NotEmpty(t, sigEnc)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
+				if len(sigEnc) == 0 {
+					t.Fatal("sigEnc is empty")
+				}
 
 				tokenSigEnc, err := base64.Encode(token.Signature)
-				require.NoError(t, err)
-				require.Equal(t, sigEnc, tokenSigEnc)
+				if err != nil {
+					t.Fatalf("base64.Encode() error = %v", err)
+				}
+				if tokenSigEnc != sigEnc {
+					t.Fatalf("tokenSigEnc = %v, want %v", tokenSigEnc, sigEnc)
+				}
 
-				require.NoError(t, token.VerifyRSASignature(crypto.SHA256, rsaKeyPair.public))
+				if err := token.VerifyRSASignature(crypto.SHA256, rsaKeyPair.public); err != nil {
+					t.Fatalf("token.VerifyRSASignature() error = %v", err)
+				}
 
-				require.NoError(t, token.Verify(jwt.WithKey(rsaKeyPair.public)))
+				if err := token.Verify(jwt.WithKey(rsaKeyPair.public)); err != nil {
+					t.Fatalf("token.Verify() error = %v", err)
+				}
 			},
 		},
 		{
 			name:  "JOSE header only", // too short
 			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.Error(t, err)
-				require.Nil(t, token)
+				if err == nil {
+					t.Fatal("ParseString() error = nil, want non-nil")
+				}
+				if token != nil {
+					t.Fatalf("token = %v, want nil", token)
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims", // no signature
 			input: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.Error(t, err)
-				require.Nil(t, token)
+				if err == nil {
+					t.Fatal("ParseString() error = nil, want non-nil")
+				}
+				if token != nil {
+					t.Fatalf("token = %v, want nil", token)
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims and HMAC SHA256 signature",
 			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.NoError(t, err)
-				require.Equal(t, jwa.HS256, token.Header[header.Algorithm])
-				require.Equal(t, jwt.Type, token.Header[header.Type])
-				require.Equal(t, int64(1300819380), token.Claims[jwt.ExpirationTime])
-				require.Equal(t, "joe", token.Claims[jwt.Issuer])
-				require.Equal(t, true, token.Claims["http://example.com/is_root"])
-				require.NotEmpty(t, token.Signature)
+				if err != nil {
+					t.Fatalf("ParseString() error = %v", err)
+				}
+				if token.Header[header.Algorithm] != jwa.HS256 {
+					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.HS256)
+				}
+				if token.Header[header.Type] != jwt.Type {
+					t.Fatalf("token.Header[header.Type] = %v, want %v", token.Header[header.Type], jwt.Type)
+				}
+				if token.Claims[jwt.ExpirationTime] != int64(1300819380) {
+					t.Fatalf("token.Claims[jwt.ExpirationTime] = %v, want %v", token.Claims[jwt.ExpirationTime], int64(1300819380))
+				}
+				if token.Claims[jwt.Issuer] != "joe" {
+					t.Fatalf("token.Claims[jwt.Issuer] = %q, want %q", token.Claims[jwt.Issuer], "joe")
+				}
+				if token.Claims["http://example.com/is_root"] != true {
+					t.Fatalf("token.Claims[\"http://example.com/is_root\"] = %v, want %v", token.Claims["http://example.com/is_root"], true)
+				}
+				if len(token.Signature) == 0 {
+					t.Fatal("token.Signature is empty")
+				}
 
 				sig, err := token.HMACSignature(crypto.SHA256, testHMACSecretKey)
-				require.NoError(t, err)
-				require.NotEmpty(t, sig)
-				require.True(t, hmac.Equal([]byte(sig), token.Signature))
+				if err != nil {
+					t.Fatalf("token.HMACSignature() error = %v", err)
+				}
+				if len(sig) == 0 {
+					t.Fatal("sig is empty")
+				}
+				if !hmac.Equal([]byte(sig), token.Signature) {
+					t.Fatalf("HMACSignature() = %x, want %x", sig, token.Signature)
+				}
 
 				err = token.VerifyHMACSignature(crypto.SHA256, testHMACSecretKey)
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("token.VerifyHMACSignature() error = %v", err)
+				}
 
 				// Token is expired
 				err = token.Verify(jwt.WithKey(testHMACSecretKey), jwt.WithAllowedAlgorithms(jwa.HS256))
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("token.Verify() error = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name:  "JOSE header with claims and EdDSA signature",
 			input: eddsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
-				require.NoError(t, err)
-				require.Equal(t, jwa.EdDSA, token.Header[header.Algorithm])
-				require.Equal(t, jwt.Type, token.Header[header.Type])
-				require.NotEmpty(t, token.Claims)
-				require.NotEmpty(t, token.Signature)
+				if err != nil {
+					t.Fatalf("ParseString() error = %v", err)
+				}
+				if token.Header[header.Algorithm] != jwa.EdDSA {
+					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.EdDSA)
+				}
+				if token.Header[header.Type] != jwt.Type {
+					t.Fatalf("token.Header[header.Type] = %v, want %v", token.Header[header.Type], jwt.Type)
+				}
+				if len(token.Claims) == 0 {
+					t.Fatal("token.Claims is empty")
+				}
+				if len(token.Signature) == 0 {
+					t.Fatal("token.Signature is empty")
+				}
 
 				sig, err := token.EdDSASignature(eddsaKeyPair.private)
-				require.NoError(t, err)
-				require.NotEmpty(t, sig)
-				require.Equal(t, len(sig), len(token.Signature))
-				require.Equal(t, sig, token.Signature)
+				if err != nil {
+					t.Fatalf("token.EdDSASignature() error = %v", err)
+				}
+				if len(sig) == 0 {
+					t.Fatal("sig is empty")
+				}
+				if len(token.Signature) != len(sig) {
+					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
+				}
+				if !bytes.Equal(token.Signature, sig) {
+					t.Fatalf("token.Signature = %x, want %x", token.Signature, sig)
+				}
 
 				err = token.VerifyEdDSASignature(eddsaKeyPair.public)
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("token.VerifyEdDSASignature() error = %v", err)
+				}
 
 				err = token.Verify(jwt.WithKey(eddsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.EdDSA))
-				require.NoError(t, err)
+				if err != nil {
+					t.Fatalf("token.Verify() error = %v", err)
+				}
 			},
 		},
 	}
@@ -328,9 +475,15 @@ func TestSignJWT(t *testing.T) {
 	}
 
 	sig, err := token.Sign(keyPair.private)
-	require.NoError(t, err)
-	require.NotNil(t, sig)
-	require.Equal(t, token.Signature, sig)
+	if err != nil {
+		t.Fatalf("token.Sign() error = %v", err)
+	}
+	if sig == nil {
+		t.Fatal("sig = nil, want non-nil")
+	}
+	if !bytes.Equal(sig, token.Signature) {
+		t.Fatalf("sig = %x, want %x", sig, token.Signature)
+	}
 }
 
 func TestNew(t *testing.T) {
@@ -475,7 +628,9 @@ func TestNew(t *testing.T) {
 			}
 
 			err := token.Verify(verifyOpts...)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("token.Verify() error = %v", err)
+			}
 		})
 	}
 
@@ -543,21 +698,33 @@ func TestNewExpired(t *testing.T) {
 			token := testToken(t, test.header, test.claims, test.signingKey)
 
 			expires, err := token.Expires()
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("token.Expires() error = %v", err)
+			}
 
 			if test.expires {
-				require.True(t, expires)
+				if !expires {
+					t.Fatal("expires = false, want true")
+				}
 			} else {
-				require.False(t, expires)
+				if expires {
+					t.Fatal("expires = true, want false")
+				}
 			}
 
 			expired, err := token.Expired(time.Now)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("token.Expired() error = %v", err)
+			}
 
 			if test.expired {
-				require.True(t, expired)
+				if !expired {
+					t.Fatal("expired = false, want true")
+				}
 			} else {
-				require.False(t, expired)
+				if expired {
+					t.Fatal("expired = true, want false")
+				}
 			}
 		})
 	}
@@ -567,13 +734,21 @@ func TestVerify(t *testing.T) {
 	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
 	checkSuccess := func(t *testing.T, token *jwt.Token, err error) {
-		require.NoError(t, err)
-		require.NotNil(t, token)
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if token == nil {
+			t.Fatal("token = nil, want non-nil")
+		}
 	}
 
 	checkFailure := func(t *testing.T, token *jwt.Token, err error) {
-		require.Error(t, err)
-		require.NotNil(t, token)
+		if err == nil {
+			t.Fatal("Verify() error = nil, want non-nil")
+		}
+		if token == nil {
+			t.Fatal("token = nil, want non-nil")
+		}
 	}
 
 	tests := []struct {
@@ -704,6 +879,8 @@ func BenchmarkParseString(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		parseStringResult, err = jwt.ParseString(s)
-		require.NoError(b, err)
+		if err != nil {
+			b.Fatalf("jwt.ParseString() error = %v", err)
+		}
 	}
 }
