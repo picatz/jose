@@ -86,6 +86,14 @@ if err != nil {
 - [RFC7517](https://datatracker.ietf.org/doc/html/rfc7517) (**JWK**) JSON Web Key
 - [RFC7518](https://datatracker.ietf.org/doc/html/rfc7518) (**JWA**) JSON Web Algorithms
 - [RFC7519](https://datatracker.ietf.org/doc/html/rfc7519) (**JWT**) JSON Web Token
+- [RFC7638](https://datatracker.ietf.org/doc/html/rfc7638) JSON Web Key (JWK) Thumbprint
+- [RFC8037](https://datatracker.ietf.org/doc/html/rfc8037) (**OKP**) Ed25519 signatures and X25519 key agreement
+- [RFC9449](https://datatracker.ietf.org/doc/html/rfc9449) (**DPoP**) OAuth 2.0 Demonstrating Proof of Possession
+
+Asymmetric signing accepts any `crypto.Signer`, so keys held in hardware
+(PIV, TPM, Secure Enclave) or a remote KMS sign the same way as in-memory
+keys, and JWE decryption accepts `jwe.KeyAgreement` and `crypto.Decrypter`
+for the same reason.
 
 ## History
 
