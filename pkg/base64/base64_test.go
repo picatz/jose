@@ -1,11 +1,11 @@
 package base64
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func TestEncodeDecode(t *testing.T) {
@@ -36,8 +36,12 @@ func TestEncodeDecode(t *testing.T) {
 				buff := make([]byte, numBytes)
 
 				n, err := rand.Read(buff)
-				require.NoError(t, err)
-				require.Equal(t, n, numBytes)
+				if err != nil {
+					t.Fatalf("rand.Read() error = %v", err)
+				}
+				if numBytes != n {
+					t.Fatalf("rand.Read() = %d, want %d", n, numBytes)
+				}
 
 				t.Logf("random bytes for test: %x", buff)
 
@@ -51,20 +55,32 @@ func TestEncodeDecode(t *testing.T) {
 			// Handle empty input case - should return empty string
 			if len(test.input) == 0 {
 				encoded, err := Encode(test.input)
-				require.Error(t, err)
-				require.Equal(t, "", encoded)
+				if err == nil {
+					t.Fatal("Encode() error = nil, want non-nil")
+				}
+				if encoded != "" {
+					t.Fatalf("encoded = %q, want %q", encoded, "")
+				}
 				return
 			}
 
 			encoded, err := Encode(test.input)
-			require.NoError(t, err)
+			if err != nil {
+				t.Fatalf("Encode() error = %v", err)
+			}
 
 			// Verify no padding characters in output
-			require.NotContains(t, encoded, "=", "encoded output should not contain padding")
+			if strings.Contains(encoded, "=") {
+				t.Fatalf("encoded = %q, want no %q", encoded, "=")
+			}
 
 			decoded, err := Decode(encoded)
-			require.NoError(t, err)
-			require.Equal(t, test.input, decoded)
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if !bytes.Equal(decoded, test.input) {
+				t.Fatalf("decoded = %x, want %x", decoded, test.input)
+			}
 		})
 	}
 }
@@ -116,12 +132,20 @@ func TestRFCCompliance(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			encoded, err := Encode(test.input)
-			require.NoError(t, err)
-			require.Equal(t, test.expected, encoded)
+			if err != nil {
+				t.Fatalf("Encode() error = %v", err)
+			}
+			if encoded != test.expected {
+				t.Fatalf("encoded = %v, want %v", encoded, test.expected)
+			}
 
 			decoded, err := Decode(test.expected)
-			require.NoError(t, err)
-			require.Equal(t, test.input, decoded)
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if !bytes.Equal(decoded, test.input) {
+				t.Fatalf("decoded = %x, want %x", decoded, test.input)
+			}
 		})
 	}
 }
@@ -158,8 +182,12 @@ func TestDecodeWithPadding(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			decoded, err := Decode(test.input)
-			require.NoError(t, err)
-			require.Equal(t, test.expected, decoded)
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if !bytes.Equal(decoded, test.expected) {
+				t.Fatalf("decoded = %x, want %x", decoded, test.expected)
+			}
 		})
 	}
 }
@@ -183,7 +211,9 @@ func TestDecodeErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := Decode(test.input)
-			require.Error(t, err)
+			if err == nil {
+				t.Fatal("Decode() error = nil, want non-nil")
+			}
 		})
 	}
 }
@@ -202,13 +232,21 @@ func TestPaddingRemoval(t *testing.T) {
 	for _, input := range inputs {
 		t.Run(fmt.Sprintf("input_%d_bytes", len(input)), func(t *testing.T) {
 			encoded, err := Encode(input)
-			require.NoError(t, err)
-			require.NotContains(t, encoded, "=", "encoded output should never contain padding")
+			if err != nil {
+				t.Fatalf("Encode() error = %v", err)
+			}
+			if strings.Contains(encoded, "=") {
+				t.Fatalf("encoded = %q, want no %q", encoded, "=")
+			}
 
 			// Verify round-trip
 			decoded, err := Decode(encoded)
-			require.NoError(t, err)
-			require.Equal(t, input, decoded)
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			if !bytes.Equal(decoded, input) {
+				t.Fatalf("decoded = %x, want %x", decoded, input)
+			}
 		})
 	}
 }
@@ -243,7 +281,9 @@ func BenchmarkDecode(b *testing.B) {
 		data := make([]byte, size)
 		rand.Read(data)
 		encoded, err := Encode(data)
-		require.NoError(b, err)
+		if err != nil {
+			b.Fatalf("Encode() error = %v", err)
+		}
 
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			b.SetBytes(int64(size))
@@ -258,28 +298,41 @@ func BenchmarkDecode(b *testing.B) {
 func TestEmptyInput(t *testing.T) {
 	t.Run("encode empty slice", func(t *testing.T) {
 		result, err := Encode([]byte{})
-		require.Error(t, err, "encoding empty slice should return an error")
-		require.Equal(t, "", result, "encoding empty slice should return empty string")
+		if err == nil {
+			t.Fatal("Encode(empty) error = nil, want non-nil")
+		}
+		if result != "" {
+			t.Fatalf("Encode(empty) = %q, want empty string", result)
+		}
 	})
 
 	t.Run("encode nil slice", func(t *testing.T) {
 		result, err := Encode(nil)
-		require.Error(t, err, "encoding nil slice should return an error")
-		require.Equal(t, "", result, "encoding nil slice should return empty string")
+		if err == nil {
+			t.Fatal("Encode(nil) error = nil, want non-nil")
+		}
+		if result != "" {
+			t.Fatalf("Encode(nil) = %q, want empty string", result)
+		}
 	})
 
 	t.Run("decode empty string", func(t *testing.T) {
 		result, err := Decode("")
-		require.Error(t, err)
-		require.Nil(t, result, "decoding empty string should return nil")
+		if err == nil {
+			t.Fatal("Decode() error = nil, want non-nil")
+		}
+		if result != nil {
+			t.Fatalf("Decode(\"\") = %v, want nil", result)
+		}
 	})
 }
 
 // TestErrorWrapping verifies that errors are properly wrapped
 func TestErrorWrapping(t *testing.T) {
 	_, err := Decode("invalid@base64url")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid base64url input")
+	if err == nil || !strings.Contains(err.Error(), "invalid base64url input") {
+		t.Fatalf("Decode() error = %v, want error containing %q", err, "invalid base64url input")
+	}
 }
 
 // TestLongInput tests with longer inputs to verify performance and correctness
@@ -291,11 +344,21 @@ func TestLongInput(t *testing.T) {
 	}
 
 	encoded, err := Encode(input)
-	require.NoError(t, err)
-	require.NotEmpty(t, encoded)
-	require.NotContains(t, encoded, "=", "should not contain padding")
+	if err != nil {
+		t.Fatalf("Encode() error = %v", err)
+	}
+	if len(encoded) == 0 {
+		t.Fatal("encoded is empty")
+	}
+	if strings.Contains(encoded, "=") {
+		t.Fatalf("encoded = %q, want no %q", encoded, "=")
+	}
 
 	decoded, err := Decode(encoded)
-	require.NoError(t, err)
-	require.Equal(t, input, decoded)
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !bytes.Equal(decoded, input) {
+		t.Fatalf("Decode(Encode(input)) did not round-trip a %d-byte input (got %d bytes)", len(input), len(decoded))
+	}
 }

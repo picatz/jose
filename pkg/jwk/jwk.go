@@ -1,11 +1,8 @@
 package jwk
 
 import (
-	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/rsa"
 	"fmt"
-	"math/big"
 
 	"github.com/picatz/jose/pkg/base64"
 )
@@ -266,73 +263,6 @@ func HMACSecretKey(v Value) ([]byte, error) {
 	return base64.Decode(key)
 }
 
-// RSAPublicKey returns the RSA public key and blinding value, or an error
-// if the key is not an RSA public key.
-func RSAPublicKey(v Value) (pkey *rsa.PublicKey, blindingValue []byte, err error) {
-	nEnc, eEnc, dEnc, err := RSAValues(v)
-	if err != nil {
-		err = fmt.Errorf("failed to get RSA public key: %w", err)
-		return
-	}
-
-	var (
-		// n is the RSA public modulus.
-		n = new(big.Int)
-
-		// e is the RSA public exponent.
-		e = new(big.Int)
-
-		// d is the RSA private exponent.
-		d []byte
-	)
-
-	pkey = &rsa.PublicKey{}
-
-	nBytes, err := base64.Decode(nEnc)
-	if err != nil {
-		err = fmt.Errorf("failed to decode RSA public key N: %w", err)
-		return
-	}
-	n.SetBytes(nBytes)
-
-	pkey.N = n
-
-	eBytes, err := base64.Decode(eEnc)
-	if err != nil {
-		err = fmt.Errorf("failed to decode RSA public key E: %w", err)
-		return
-	}
-	e.SetBytes(eBytes)
-
-	pkey.E = int(e.Int64())
-
-	// d is optional
-	if len(dEnc) > 0 {
-		d, err = base64.Decode(dEnc)
-		if err != nil {
-			err = fmt.Errorf("failed to decode RSA public key D: %w", err)
-			return
-		}
-		blindingValue = d
-	}
-
-	return
-}
-
-// ECDSAPublicKey returns the ECDSA public key and blinding value, or an error
-// if the key is not an ECDSA public key or its point is not on its curve.
-// The blinding value is always nil and is kept for compatibility.
-func ECDSAPublicKey(v Value) (pkey *ecdsa.PublicKey, blindingValue []byte, err error) {
-	if v[KeyType] != KeyTypeEC {
-		return nil, nil, fmt.Errorf("failed to get ECDSA values for public key: JWK value is not EC")
-	}
-	curve, _, point, err := ecPoint(v)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get ECDSA public key: %w", err)
-	}
-	return ecdsaFromPoint(curve, point), nil, nil
-}
-
 // Ed25519PublicKey returns the Ed25519 public key, or an error if the
 // key is not an Ed25519 public key.
 func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
@@ -357,25 +287,6 @@ func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
 	pkey = xBytes
 
 	return
-}
-
-// ValueFromPublicKey returns a JWK value from the given public key, with
-// "use" set to "sig". EC coordinates are encoded at the full width of their
-// curve, as https://www.rfc-editor.org/rfc/rfc7518.html#section-6.2.1.2
-// requires, so thumbprints match other implementations. Use [PublicValue]
-// for a key without a "use" member.
-func ValueFromPublicKey(pubKey any) (Value, error) {
-	switch pubKey.(type) {
-	case *rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey:
-	default:
-		return nil, fmt.Errorf("invalid type %T used for JWK value", pubKey)
-	}
-	value, err := PublicValue(pubKey)
-	if err != nil {
-		return nil, err
-	}
-	value[PublicKeyUse] = "sig"
-	return value, nil
 }
 
 // Set is a JWK set as defined in RFC 7517.

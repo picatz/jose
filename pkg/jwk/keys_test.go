@@ -34,8 +34,8 @@ func TestPublicValueUsesFixedWidthCoordinates(t *testing.T) {
 		t.Skip("no short coordinate found")
 	}
 	for name, value := range map[string]func() (jwk.Value, error){
-		"PublicValue":        func() (jwk.Value, error) { return jwk.PublicValue(key) },
-		"ValueFromPublicKey": func() (jwk.Value, error) { return jwk.ValueFromPublicKey(&key.PublicKey) },
+		"private key": func() (jwk.Value, error) { return jwk.PublicValue(key) },
+		"public key":  func() (jwk.Value, error) { return jwk.PublicValue(&key.PublicKey) },
 	} {
 		v, err := value()
 		if err != nil {
@@ -74,9 +74,6 @@ func TestPublicKeyRejectsOffCurvePoint(t *testing.T) {
 	v[jwk.Y], _ = base64.Encode(y)
 	if _, err := jwk.PublicKey(v); !errors.Is(err, jwk.ErrInvalidKey) {
 		t.Fatalf("PublicKey(off-curve) = %v, want ErrInvalidKey", err)
-	}
-	if _, _, err := jwk.ECDSAPublicKey(v); err == nil {
-		t.Fatal("ECDSAPublicKey accepted an off-curve point")
 	}
 }
 

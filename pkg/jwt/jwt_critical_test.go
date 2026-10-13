@@ -1,12 +1,12 @@
 package jwt_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/stretchr/testify/require"
 )
 
 // TestCriticalHeaderValidation tests RFC 7515 section 4.1.11 critical header validation
@@ -28,7 +28,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowInsecureNoneAlgorithm(true),
 			jwt.WithAllowedAlgorithms(jwa.None),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 	})
 
 	t.Run("Valid Critical Header", func(t *testing.T) {
@@ -52,7 +54,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("custom-ext", "another-ext"),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 	})
 
 	t.Run("Unsupported Critical Header", func(t *testing.T) {
@@ -75,8 +79,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("custom-ext"), // Different from what's in token
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported critical header parameter: \"unsupported-ext\"")
+		if err == nil || !strings.Contains(err.Error(), "unsupported critical header parameter: \"unsupported-ext\"") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "unsupported critical header parameter: \"unsupported-ext\"")
+		}
 	})
 
 	t.Run("Critical Header Not Present", func(t *testing.T) {
@@ -99,8 +104,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("missing-ext"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "critical header parameter \"missing-ext\" is missing from header")
+		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"missing-ext\" is missing from header") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"missing-ext\" is missing from header")
+		}
 	})
 
 	t.Run("Empty Critical Header Array", func(t *testing.T) {
@@ -121,8 +127,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowInsecureNoneAlgorithm(true),
 			jwt.WithAllowedAlgorithms(jwa.None),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "critical header parameter \"crit\" must not be empty")
+		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"crit\" must not be empty") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"crit\" must not be empty")
+		}
 	})
 
 	t.Run("Critical Header Wrong Type", func(t *testing.T) {
@@ -143,8 +150,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowInsecureNoneAlgorithm(true),
 			jwt.WithAllowedAlgorithms(jwa.None),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "critical header parameter \"crit\" must be an array")
+		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"crit\" must be an array") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"crit\" must be an array")
+		}
 	})
 
 	t.Run("Critical Header Non-String Elements", func(t *testing.T) {
@@ -167,8 +175,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("valid-ext"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "critical header parameter names must be strings")
+		if err == nil || !strings.Contains(err.Error(), "critical header parameter names must be strings") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter names must be strings")
+		}
 	})
 
 	t.Run("Standard Header in Critical List", func(t *testing.T) {
@@ -190,8 +199,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("alg"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "critical header parameter \"alg\" is a standard header and cannot be marked as critical")
+		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"alg\" is a standard header and cannot be marked as critical") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"alg\" is a standard header and cannot be marked as critical")
+		}
 	})
 
 	t.Run("Multiple Standard Headers in Critical List", func(t *testing.T) {
@@ -217,8 +227,9 @@ func TestCriticalHeaderValidation(t *testing.T) {
 					jwt.WithAllowedAlgorithms(jwa.None),
 					jwt.WithSupportedCriticalHeaders(stdHeader),
 				)
-				require.Error(t, err)
-				require.Contains(t, err.Error(), "is a standard header and cannot be marked as critical")
+				if err == nil || !strings.Contains(err.Error(), "is a standard header and cannot be marked as critical") {
+					t.Fatalf("token.Verify() error = %v, want error containing %q", err, "is a standard header and cannot be marked as critical")
+				}
 			})
 		}
 	})
@@ -247,6 +258,8 @@ func TestCriticalHeaderValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithSupportedCriticalHeaders("custom-auth", "rate-limit", "version", "other-ext"),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 	})
 }

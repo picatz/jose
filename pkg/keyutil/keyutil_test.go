@@ -7,8 +7,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -85,89 +83,166 @@ CKuHRG+AP579dncdUnOMvfXOtkdM4vk0+hWASBQzM9xzVcztCa+koAugjVaLS9A+
 func TestNewSymmetricKey(t *testing.T) {
 	size := 256
 	key, err := NewSymmetricKey(size)
-	require.NoError(t, err)
-	require.Equal(t, size, len(key))
+	if err != nil {
+		t.Fatalf("NewSymmetricKey() error = %v", err)
+	}
+	if len(key) != size {
+		t.Fatalf("len(key) = %v, want %v", len(key), size)
+	}
 }
 
 func TestNewSymmetricKeyEqual(t *testing.T) {
 	key1, err := NewSymmetricKey(256)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("NewSymmetricKey() error = %v", err)
+	}
 
 	key2, err := NewSymmetricKey(512)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatalf("NewSymmetricKey() error = %v", err)
+	}
 
-	require.True(t, SymmetricKeysEqual(key1, key1))
-	require.True(t, SymmetricKeysEqual(key2, key2))
-	require.False(t, SymmetricKeysEqual(key1, key2))
+	if !SymmetricKeysEqual(key1, key1) {
+		t.Fatal("SymmetricKeysEqual(key1, key1) = false, want true")
+	}
+	if !SymmetricKeysEqual(key2, key2) {
+		t.Fatal("SymmetricKeysEqual(key2, key2) = false, want true")
+	}
+	if SymmetricKeysEqual(key1, key2) {
+		t.Fatal("SymmetricKeysEqual(key1, key2) = true, want false")
+	}
 }
 
 func TestParseRSAPublicKey(t *testing.T) {
 	key := testRSAPublicKey
 
 	publicKey, err := ParseRSAPublicKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, publicKey)
-	require.Equal(t, 256, publicKey.Size())
-	require.Equal(t, 65537, publicKey.E)
-	require.NotZero(t, publicKey.N)
+	if err != nil {
+		t.Fatalf("ParseRSAPublicKey() error = %v", err)
+	}
+	if publicKey == nil {
+		t.Fatal("publicKey = nil, want non-nil")
+	}
+	if publicKey.Size() != 256 {
+		t.Fatalf("publicKey.Size() = %v, want %v", publicKey.Size(), 256)
+	}
+	if publicKey.E != 65537 {
+		t.Fatalf("publicKey.E = %v, want %v", publicKey.E, 65537)
+	}
+	if publicKey.N == nil {
+		t.Fatal("publicKey.N = nil, want non-nil")
+	}
 }
 
 func TestParseRSAPrivateKey(t *testing.T) {
 	key := testRSAPrivateKey
 
 	privateKey, err := ParseRSAPrivateKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, privateKey)
+	if err != nil {
+		t.Fatalf("ParseRSAPrivateKey() error = %v", err)
+	}
+	if privateKey == nil {
+		t.Fatal("privateKey = nil, want non-nil")
+	}
 
-	require.NotNil(t, privateKey.D)
-	require.NotNil(t, privateKey.N)
-	require.NotZero(t, privateKey.E)
-	require.Equal(t, 256, privateKey.Size())
-	require.NotEmpty(t, privateKey.Primes)
-	require.NotNil(t, privateKey.PublicKey)
-	require.Equal(t, 256, privateKey.PublicKey.Size())
-	require.Equal(t, 65537, privateKey.PublicKey.E)
-	require.NotZero(t, privateKey.PublicKey.N)
+	if privateKey.D == nil {
+		t.Fatal("privateKey.D = nil, want non-nil")
+	}
+	if privateKey.N == nil {
+		t.Fatal("privateKey.N = nil, want non-nil")
+	}
+	if privateKey.E == 0 {
+		t.Fatal("privateKey.E = 0, want non-zero")
+	}
+	if privateKey.Size() != 256 {
+		t.Fatalf("privateKey.Size() = %v, want %v", privateKey.Size(), 256)
+	}
+	if len(privateKey.Primes) == 0 {
+		t.Fatal("privateKey.Primes is empty")
+	}
+	if privateKey.PublicKey.Size() != 256 {
+		t.Fatalf("privateKey.PublicKey.Size() = %v, want %v", privateKey.PublicKey.Size(), 256)
+	}
+	if privateKey.PublicKey.E != 65537 {
+		t.Fatalf("privateKey.PublicKey.E = %v, want %v", privateKey.PublicKey.E, 65537)
+	}
+	if privateKey.PublicKey.N == nil {
+		t.Fatal("privateKey.PublicKey.N = nil, want non-nil")
+	}
 }
 
 func TestParseECDSAPublicKey(t *testing.T) {
 	key := testECDSAPublicKey
 
 	publicKey, err := ParseECDSAPublicKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, publicKey)
-	require.Equal(t, publicKey.Curve, elliptic.P256())
-	require.NotZero(t, publicKey.X)
-	require.NotZero(t, publicKey.Y)
+	if err != nil {
+		t.Fatalf("ParseECDSAPublicKey() error = %v", err)
+	}
+	if publicKey == nil {
+		t.Fatal("publicKey = nil, want non-nil")
+	}
+	if publicKey.Curve != elliptic.P256() {
+		t.Fatalf("publicKey.Curve = %v, want P-256", publicKey.Curve.Params().Name)
+	}
+	if publicKey.X == nil {
+		t.Fatal("publicKey.X = nil, want non-nil")
+	}
+	if publicKey.Y == nil {
+		t.Fatal("publicKey.Y = nil, want non-nil")
+	}
 }
 
 func TestParseECDSAPrivateKey(t *testing.T) {
 	key := testECDSAPrivateKey
 
 	privateKey, err := ParseECDSAPrivateKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, privateKey)
-	require.Equal(t, privateKey.Curve, elliptic.P256())
-	require.NotZero(t, privateKey.D)
-	require.NotZero(t, privateKey.X)
-	require.NotZero(t, privateKey.Y)
+	if err != nil {
+		t.Fatalf("ParseECDSAPrivateKey() error = %v", err)
+	}
+	if privateKey == nil {
+		t.Fatal("privateKey = nil, want non-nil")
+	}
+	if privateKey.Curve != elliptic.P256() {
+		t.Fatalf("privateKey.Curve = %v, want P-256", privateKey.Curve.Params().Name)
+	}
+	if privateKey.D == nil {
+		t.Fatal("privateKey.D = nil, want non-nil")
+	}
+	if privateKey.X == nil {
+		t.Fatal("privateKey.X = nil, want non-nil")
+	}
+	if privateKey.Y == nil {
+		t.Fatal("privateKey.Y = nil, want non-nil")
+	}
 }
 
 func TestParseEdDSAPublicKey(t *testing.T) {
 	key := testEdDSAPublicKey
 
 	publicKey, err := ParseEdDSAPublicKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, publicKey)
-	require.NotEmpty(t, publicKey)
+	if err != nil {
+		t.Fatalf("ParseEdDSAPublicKey() error = %v", err)
+	}
+	if publicKey == nil {
+		t.Fatal("publicKey = nil, want non-nil")
+	}
+	if len(publicKey) == 0 {
+		t.Fatal("publicKey is empty")
+	}
 }
 
 func TestParseEdDSAPrivateKey(t *testing.T) {
 	key := testEdDSAPrivateKey
 	privateKey, err := ParseEdDSAPrivateKey(bytes.NewReader(key))
-	require.NoError(t, err)
-	require.NotNil(t, privateKey)
-	require.NotEmpty(t, privateKey)
+	if err != nil {
+		t.Fatalf("ParseEdDSAPrivateKey() error = %v", err)
+	}
+	if privateKey == nil {
+		t.Fatal("privateKey = nil, want non-nil")
+	}
+	if len(privateKey) == 0 {
+		t.Fatal("privateKey is empty")
+	}
 }
 
 func TestParsePrivateKey(t *testing.T) {
@@ -180,54 +255,105 @@ func TestParsePrivateKey(t *testing.T) {
 			name: "RS256",
 			key:  testRSAPrivateKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePrivateKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				rsaKey, ok := key.(*rsa.PrivateKey)
-				require.True(t, ok)
-				require.NotNil(t, rsaKey)
-				require.Equal(t, 256, rsaKey.Size())
-				require.NotNil(t, rsaKey.D)
-				require.NotNil(t, rsaKey.N)
-				require.NotZero(t, rsaKey.E)
-				require.NotEmpty(t, rsaKey.Primes)
-				require.NotNil(t, rsaKey.PublicKey)
-				require.Equal(t, 256, rsaKey.PublicKey.Size())
-				require.Equal(t, 65537, rsaKey.PublicKey.E)
-				require.NotZero(t, rsaKey.PublicKey.N)
+				if !ok {
+					t.Fatalf("key type = %T, want *rsa.PrivateKey", key)
+				}
+				if rsaKey == nil {
+					t.Fatal("rsaKey = nil, want non-nil")
+				}
+				if rsaKey.Size() != 256 {
+					t.Fatalf("rsaKey.Size() = %v, want %v", rsaKey.Size(), 256)
+				}
+				if rsaKey.D == nil {
+					t.Fatal("rsaKey.D = nil, want non-nil")
+				}
+				if rsaKey.N == nil {
+					t.Fatal("rsaKey.N = nil, want non-nil")
+				}
+				if rsaKey.E == 0 {
+					t.Fatal("rsaKey.E = 0, want non-zero")
+				}
+				if len(rsaKey.Primes) == 0 {
+					t.Fatal("rsaKey.Primes is empty")
+				}
+				if rsaKey.PublicKey.Size() != 256 {
+					t.Fatalf("rsaKey.PublicKey.Size() = %v, want %v", rsaKey.PublicKey.Size(), 256)
+				}
+				if rsaKey.PublicKey.E != 65537 {
+					t.Fatalf("rsaKey.PublicKey.E = %v, want %v", rsaKey.PublicKey.E, 65537)
+				}
+				if rsaKey.PublicKey.N == nil {
+					t.Fatal("rsaKey.PublicKey.N = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name: "ES256",
 			key:  testECDSAPrivateKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePrivateKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				ecdsaKey, ok := key.(*ecdsa.PrivateKey)
-				require.True(t, ok)
-				require.NotNil(t, ecdsaKey)
-				require.Equal(t, elliptic.P256(), ecdsaKey.Curve)
-				require.NotZero(t, ecdsaKey.D)
-				require.NotZero(t, ecdsaKey.X)
-				require.NotZero(t, ecdsaKey.Y)
+				if !ok {
+					t.Fatalf("key type = %T, want *ecdsa.PrivateKey", key)
+				}
+				if ecdsaKey == nil {
+					t.Fatal("ecdsaKey = nil, want non-nil")
+				}
+				if ecdsaKey.Curve != elliptic.P256() {
+					t.Fatalf("ecdsaKey.Curve = %v, want P-256", ecdsaKey.Curve.Params().Name)
+				}
+				if ecdsaKey.D == nil {
+					t.Fatal("ecdsaKey.D = nil, want non-nil")
+				}
+				if ecdsaKey.X == nil {
+					t.Fatal("ecdsaKey.X = nil, want non-nil")
+				}
+				if ecdsaKey.Y == nil {
+					t.Fatal("ecdsaKey.Y = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name: "EdDSA",
 			key:  testEdDSAPrivateKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePrivateKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				edKey, ok := key.(ed25519.PrivateKey)
-				require.True(t, ok)
-				require.NotEmpty(t, edKey)
+				if !ok {
+					t.Fatalf("key type = %T, want ed25519.PrivateKey", key)
+				}
+				if len(edKey) == 0 {
+					t.Fatal("edKey is empty")
+				}
 			},
 		},
 		{
 			name: "invalid",
 			key:  []byte("..."),
 			check: func(t *testing.T, key any, err error) {
-				require.Error(t, err)
-				require.Nil(t, key)
+				if err == nil {
+					t.Fatal("ParsePrivateKey() error = nil, want non-nil")
+				}
+				if key != nil {
+					t.Fatalf("key = %v, want nil", key)
+				}
 			},
 		},
 	}
@@ -251,47 +377,87 @@ func TestParsePublicKey(t *testing.T) {
 			name: "RS256",
 			key:  testRSAPublicKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePublicKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				rsaKey, ok := key.(*rsa.PublicKey)
-				require.True(t, ok)
-				require.NotNil(t, rsaKey)
-				require.Equal(t, 256, rsaKey.Size())
-				require.Equal(t, 65537, rsaKey.E)
-				require.NotZero(t, rsaKey.N)
+				if !ok {
+					t.Fatalf("key type = %T, want *rsa.PublicKey", key)
+				}
+				if rsaKey == nil {
+					t.Fatal("rsaKey = nil, want non-nil")
+				}
+				if rsaKey.Size() != 256 {
+					t.Fatalf("rsaKey.Size() = %v, want %v", rsaKey.Size(), 256)
+				}
+				if rsaKey.E != 65537 {
+					t.Fatalf("rsaKey.E = %v, want %v", rsaKey.E, 65537)
+				}
+				if rsaKey.N == nil {
+					t.Fatal("rsaKey.N = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name: "ES256",
 			key:  testECDSAPublicKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePublicKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				ecdsaKey, ok := key.(*ecdsa.PublicKey)
-				require.True(t, ok)
-				require.NotNil(t, ecdsaKey)
-				require.Equal(t, elliptic.P256(), ecdsaKey.Curve)
-				require.NotZero(t, ecdsaKey.X)
-				require.NotZero(t, ecdsaKey.Y)
+				if !ok {
+					t.Fatalf("key type = %T, want *ecdsa.PublicKey", key)
+				}
+				if ecdsaKey == nil {
+					t.Fatal("ecdsaKey = nil, want non-nil")
+				}
+				if ecdsaKey.Curve != elliptic.P256() {
+					t.Fatalf("ecdsaKey.Curve = %v, want P-256", ecdsaKey.Curve.Params().Name)
+				}
+				if ecdsaKey.X == nil {
+					t.Fatal("ecdsaKey.X = nil, want non-nil")
+				}
+				if ecdsaKey.Y == nil {
+					t.Fatal("ecdsaKey.Y = nil, want non-nil")
+				}
 			},
 		},
 		{
 			name: "EdDSA",
 			key:  testEdDSAPublicKey,
 			check: func(t *testing.T, key any, err error) {
-				require.NoError(t, err)
-				require.NotNil(t, key)
+				if err != nil {
+					t.Fatalf("ParsePublicKey() error = %v", err)
+				}
+				if key == nil {
+					t.Fatal("key = nil, want non-nil")
+				}
 				edKey, ok := key.(ed25519.PublicKey)
-				require.True(t, ok)
-				require.NotEmpty(t, edKey)
+				if !ok {
+					t.Fatalf("key type = %T, want ed25519.PublicKey", key)
+				}
+				if len(edKey) == 0 {
+					t.Fatal("edKey is empty")
+				}
 			},
 		},
 		{
 			name: "invalid",
 			key:  []byte("..."),
 			check: func(t *testing.T, key any, err error) {
-				require.Error(t, err)
-				require.Nil(t, key)
+				if err == nil {
+					t.Fatal("ParsePublicKey() error = nil, want non-nil")
+				}
+				if key != nil {
+					t.Fatalf("key = %v, want nil", key)
+				}
 			},
 		},
 	}
@@ -308,22 +474,40 @@ func TestParsePublicKey(t *testing.T) {
 func TestNewKeyPairs(t *testing.T) {
 	t.Run("RSA", func(t *testing.T) {
 		pub, priv, err := NewRSAKeyPair()
-		require.NoError(t, err)
-		require.NotNil(t, pub)
-		require.NotNil(t, priv)
+		if err != nil {
+			t.Fatalf("NewRSAKeyPair() error = %v", err)
+		}
+		if pub == nil {
+			t.Fatal("pub = nil, want non-nil")
+		}
+		if priv == nil {
+			t.Fatal("priv = nil, want non-nil")
+		}
 	})
 
 	t.Run("ECDSA", func(t *testing.T) {
 		pub, priv, err := NewECDSAKeyPair()
-		require.NoError(t, err)
-		require.NotNil(t, pub)
-		require.NotNil(t, priv)
+		if err != nil {
+			t.Fatalf("NewECDSAKeyPair() error = %v", err)
+		}
+		if pub == nil {
+			t.Fatal("pub = nil, want non-nil")
+		}
+		if priv == nil {
+			t.Fatal("priv = nil, want non-nil")
+		}
 	})
 
 	t.Run("EdDSA", func(t *testing.T) {
 		pub, priv, err := NewEdDSAKeyPair()
-		require.NoError(t, err)
-		require.NotNil(t, pub)
-		require.NotNil(t, priv)
+		if err != nil {
+			t.Fatalf("NewEdDSAKeyPair() error = %v", err)
+		}
+		if pub == nil {
+			t.Fatal("pub = nil, want non-nil")
+		}
+		if priv == nil {
+			t.Fatal("priv = nil, want non-nil")
+		}
 	})
 }

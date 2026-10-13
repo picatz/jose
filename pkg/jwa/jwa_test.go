@@ -2,10 +2,10 @@ package jwa_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/jwa"
-	"github.com/stretchr/testify/require"
 )
 
 func TestValidateAlgorithm(t *testing.T) {
@@ -136,13 +136,14 @@ func TestValidateAlgorithm(t *testing.T) {
 			err := jwa.ValidateAlgorithm(tt.algorithm, tt.allowedAlgs)
 
 			if tt.expectError {
-				require.Error(t, err, tt.description)
-				if tt.expectedErr != nil {
-					require.True(t, errors.Is(err, tt.expectedErr),
-						"Expected error type %v, got %v", tt.expectedErr, err)
+				if err == nil {
+					t.Fatalf("ValidateAlgorithm(%q, %q) error = nil, want non-nil: %s", tt.algorithm, tt.allowedAlgs, tt.description)
 				}
-			} else {
-				require.NoError(t, err, tt.description)
+				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
+					t.Fatalf("ValidateAlgorithm(%q, %q) error = %v, want %v", tt.algorithm, tt.allowedAlgs, err, tt.expectedErr)
+				}
+			} else if err != nil {
+				t.Fatalf("ValidateAlgorithm(%q, %q) error = %v: %s", tt.algorithm, tt.allowedAlgs, err, tt.description)
 			}
 		})
 	}
@@ -160,7 +161,9 @@ func TestValidateAlgorithm_AllKnownAlgorithms(t *testing.T) {
 	for _, alg := range knownAlgs {
 		t.Run(string(alg), func(t *testing.T) {
 			err := jwa.ValidateAlgorithm(alg, []jwa.Algorithm{alg})
-			require.NoError(t, err, "Known algorithm %s should pass validation", alg)
+			if err != nil {
+				t.Fatalf("ValidateAlgorithm(%q) error = %v, want nil for a known algorithm", alg, err)
+			}
 		})
 	}
 }
@@ -168,18 +171,34 @@ func TestValidateAlgorithm_AllKnownAlgorithms(t *testing.T) {
 func TestValidateAlgorithm_ErrorWrapping(t *testing.T) {
 	t.Run("Unknown algorithm error message", func(t *testing.T) {
 		err := jwa.ValidateAlgorithm("FAKE_ALG", []jwa.Algorithm{"FAKE_ALG"})
-		require.Error(t, err)
-		require.True(t, errors.Is(err, jwa.ErrUnknownAlgorithm))
-		require.Contains(t, err.Error(), "FAKE_ALG")
-		require.Contains(t, err.Error(), "is not a known algorithm")
+		if err == nil {
+			t.Fatal("jwa.ValidateAlgorithm() error = nil, want non-nil")
+		}
+		if !errors.Is(err, jwa.ErrUnknownAlgorithm) {
+			t.Fatalf("jwa.ValidateAlgorithm() error = %v, want %v", err, jwa.ErrUnknownAlgorithm)
+		}
+		if !strings.Contains(err.Error(), "FAKE_ALG") {
+			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "FAKE_ALG")
+		}
+		if !strings.Contains(err.Error(), "is not a known algorithm") {
+			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "is not a known algorithm")
+		}
 	})
 
 	t.Run("Algorithm not allowed error message", func(t *testing.T) {
 		err := jwa.ValidateAlgorithm(jwa.RS256, []jwa.Algorithm{jwa.HS256})
-		require.Error(t, err)
-		require.True(t, errors.Is(err, jwa.ErrAlgorithmNotAllowed))
-		require.Contains(t, err.Error(), "RS256")
-		require.Contains(t, err.Error(), "is not allowed")
+		if err == nil {
+			t.Fatal("jwa.ValidateAlgorithm() error = nil, want non-nil")
+		}
+		if !errors.Is(err, jwa.ErrAlgorithmNotAllowed) {
+			t.Fatalf("jwa.ValidateAlgorithm() error = %v, want %v", err, jwa.ErrAlgorithmNotAllowed)
+		}
+		if !strings.Contains(err.Error(), "RS256") {
+			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "RS256")
+		}
+		if !strings.Contains(err.Error(), "is not allowed") {
+			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "is not allowed")
+		}
 	})
 }
 

@@ -74,7 +74,7 @@ type Token struct {
 // reason, an error is returned with a nil token.
 //
 // Using this function does not require the given header parameters define
-// the "typ" (header.Type), which is always set to "JWT" (header.TypeJWT), but
+// the "typ" (header.Type), which is always set to "JWT" ([Type]), but
 // callers can include it if they like.
 //
 // The claims set must not be empty, or will return an error.
@@ -286,13 +286,13 @@ func Parse[T Parseable](input T) (*Token, error) {
 
 // ParseAndVerify parses a given JWT, and verifies the signature
 // using the given verification configuration options.
-func ParseAndVerify[T Parseable](input T, veryifyOptions ...VerifyOption) (*Token, error) {
+func ParseAndVerify[T Parseable](input T, verifyOptions ...VerifyOption) (*Token, error) {
 	token, err := Parse(input)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse JWT: %w", err)
 	}
 
-	err = token.Verify(veryifyOptions...)
+	err = token.Verify(verifyOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify JWT signature: %w", err)
 	}
@@ -822,8 +822,9 @@ func (t *Token) VerifyHMACSignature(hash crypto.Hash, key any) error {
 		return fmt.Errorf("failed to create signing input: %w", err)
 	}
 
-	// Use JWS for the actual verification operation (without key size validation for compatibility)
-	return jwsToken.VerifyHMACForLegacy(hash, key, signingInput)
+	// RFC 7518 §3.2: a key shorter than the hash output is refused on
+	// verification as well as on signing.
+	return jwsToken.VerifyHMAC(hash, key, signingInput)
 }
 
 // VerifyRSASignature verifies the RSA signature of the token using the

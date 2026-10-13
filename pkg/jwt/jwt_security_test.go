@@ -1,6 +1,8 @@
 package jwt_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,7 +11,6 @@ import (
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
 	"github.com/picatz/jose/pkg/keyutil"
-	"github.com/stretchr/testify/require"
 )
 
 // TestSecurityVulnerabilities tests various security vulnerabilities and attack vectors
@@ -35,8 +36,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.HS256),
 			jwt.WithKey(rsaKeyPair.public),
 		)
-		require.Error(t, err)
-		require.ErrorIs(t, err, jwt.ErrInvalidToken)
+		if !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		}
 	})
 
 	t.Run("Weak HMAC Key", func(t *testing.T) {
@@ -53,8 +55,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 			},
 			weakKey,
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "HMAC key must be at least 32 bytes")
+		if err == nil || !strings.Contains(err.Error(), "HMAC key must be at least 32 bytes") {
+			t.Fatalf("jwt.New() error = %v, want error containing %q", err, "HMAC key must be at least 32 bytes")
+		}
 	})
 
 	t.Run("None Algorithm Security", func(t *testing.T) {
@@ -72,8 +75,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 
 		// Should fail without explicit allowance
 		err := token.Verify()
-		require.Error(t, err)
-		require.ErrorIs(t, err, jwt.ErrInvalidToken)
+		if !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		}
 
 		// Should still fail even with explicit allowance if signature is not empty
 		tokenWithSig := &jwt.Token{
@@ -91,8 +95,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 			jwt.WithAllowInsecureNoneAlgorithm(true),
 			jwt.WithAllowedAlgorithms(jwa.None),
 		)
-		require.Error(t, err)
-		require.ErrorIs(t, err, jwt.ErrInvalidToken)
+		if !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Fatalf("tokenWithSig.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		}
 	})
 
 	t.Run("Missing Algorithm Header", func(t *testing.T) {
@@ -108,8 +113,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 		}
 
 		err := token.Verify(jwt.WithKey(testHMACSecretKey))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "parameter not found")
+		if err == nil || !strings.Contains(err.Error(), "parameter not found") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "parameter not found")
+		}
 	})
 
 	t.Run("Empty Algorithm Header", func(t *testing.T) {
@@ -125,8 +131,9 @@ func TestSecurityVulnerabilities(t *testing.T) {
 		}
 
 		err := token.Verify(jwt.WithKey(testHMACSecretKey))
-		require.Error(t, err)
-		require.ErrorIs(t, err, jwt.ErrInvalidToken)
+		if !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		}
 	})
 }
 
@@ -163,7 +170,9 @@ func TestTimingAttackResistance(t *testing.T) {
 			jwt.WithKey(key2), // This one will match
 			jwt.WithKey(key3),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 
 		// Verify with wrong keys - should fail
 		err = token.Verify(
@@ -171,7 +180,9 @@ func TestTimingAttackResistance(t *testing.T) {
 			jwt.WithKey(key1),
 			jwt.WithKey(key3),
 		)
-		require.Error(t, err)
+		if err == nil {
+			t.Fatal("token.Verify() error = nil, want non-nil")
+		}
 	})
 }
 
@@ -195,23 +206,27 @@ func TestClockSkewTolerance(t *testing.T) {
 
 		// Should fail without clock skew tolerance
 		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "token is expired")
+		if err == nil || !strings.Contains(err.Error(), "token is expired") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "token is expired")
+		}
 
 		// Should succeed with sufficient clock skew tolerance
 		err = token.Verify(
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithClockSkewTolerance(1*time.Minute),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 
 		// Should still fail with insufficient clock skew tolerance
 		err = token.Verify(
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithClockSkewTolerance(10*time.Second),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "token is expired")
+		if err == nil || !strings.Contains(err.Error(), "token is expired") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "token is expired")
+		}
 	})
 
 	t.Run("NotBefore with Clock Skew", func(t *testing.T) {
@@ -233,15 +248,18 @@ func TestClockSkewTolerance(t *testing.T) {
 
 		// Should fail without clock skew tolerance
 		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unable to be used before")
+		if err == nil || !strings.Contains(err.Error(), "unable to be used before") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "unable to be used before")
+		}
 
 		// Should succeed with sufficient clock skew tolerance
 		err = token.Verify(
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithClockSkewTolerance(1*time.Minute),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 	})
 }
 
@@ -266,8 +284,9 @@ func TestInvalidSignatures(t *testing.T) {
 		}
 
 		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		require.Error(t, err)
-		require.ErrorIs(t, err, jwt.ErrInvalidToken)
+		if !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		}
 	})
 
 	t.Run("Wrong Key Type for Algorithm", func(t *testing.T) {
@@ -288,8 +307,9 @@ func TestInvalidSignatures(t *testing.T) {
 
 		// Try to verify with ECDSA key (wrong type)
 		err := rsaToken.Verify(jwt.WithKey(ecdsaKeyPair.public))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to verify RSA signature using any of the allowed keys")
+		if err == nil || !strings.Contains(err.Error(), "failed to verify RSA signature using any of the allowed keys") {
+			t.Fatalf("rsaToken.Verify() error = %v, want error containing %q", err, "failed to verify RSA signature using any of the allowed keys")
+		}
 	})
 
 	t.Run("ECDSA Signature Length Validation", func(t *testing.T) {
@@ -310,8 +330,9 @@ func TestInvalidSignatures(t *testing.T) {
 		token.Signature = []byte("invalid-length-signature")
 
 		err := token.Verify(jwt.WithKey(ecdsaKeyPair.public))
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to verify ECDSA signature")
+		if err == nil || !strings.Contains(err.Error(), "failed to verify ECDSA signature") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "failed to verify ECDSA signature")
+		}
 	})
 }
 
@@ -350,10 +371,13 @@ func TestKeyValidation(t *testing.T) {
 				)
 
 				if test.shouldErr {
-					require.Error(t, err)
-					require.Contains(t, err.Error(), "HMAC key must be at least")
+					if err == nil || !strings.Contains(err.Error(), "HMAC key must be at least") {
+						t.Fatalf("jwt.New() error = %v, want error containing %q", err, "HMAC key must be at least")
+					}
 				} else {
-					require.NoError(t, err)
+					if err != nil {
+						t.Fatalf("jwt.New() error = %v", err)
+					}
 				}
 			})
 		}
@@ -376,8 +400,9 @@ func TestKeyValidation(t *testing.T) {
 
 		// This should be caught at the verification level
 		err := token.VerifyEdDSASignature(invalidKey)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid Ed25519 public key size")
+		if err == nil || !strings.Contains(err.Error(), "invalid Ed25519 public key size") {
+			t.Fatalf("token.VerifyEdDSASignature() error = %v, want error containing %q", err, "invalid Ed25519 public key size")
+		}
 	})
 }
 
@@ -397,7 +422,9 @@ func TestParsingVulnerabilities(t *testing.T) {
 		for _, malformed := range malformedTokens {
 			t.Run("malformed_"+malformed, func(t *testing.T) {
 				_, err := jwt.ParseString(malformed)
-				require.Error(t, err)
+				if err == nil {
+					t.Fatal("jwt.ParseString() error = nil, want non-nil")
+				}
 			})
 		}
 	})
@@ -410,20 +437,33 @@ func TestParsingVulnerabilities(t *testing.T) {
 
 		// Base64 encode the parts
 		headerB64, err := base64.Encode([]byte(invalidHeader))
-		require.NoError(t, err)
-		require.NotEmpty(t, headerB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(headerB64) == 0 {
+			t.Fatal("headerB64 is empty")
+		}
 		claimsB64, err := base64.Encode([]byte(validClaims))
-		require.NoError(t, err)
-		require.NotEmpty(t, claimsB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(claimsB64) == 0 {
+			t.Fatal("claimsB64 is empty")
+		}
 		sigB64, err := base64.Encode([]byte(validSig))
-		require.NoError(t, err)
-		require.NotEmpty(t, sigB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(sigB64) == 0 {
+			t.Fatal("sigB64 is empty")
+		}
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
 		_, err = jwt.ParseString(malformedToken)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to decode JOSE header JSON")
+		if err == nil || !strings.Contains(err.Error(), "failed to decode JOSE header JSON") {
+			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "failed to decode JOSE header JSON")
+		}
 	})
 
 	t.Run("Invalid JSON in Claims", func(t *testing.T) {
@@ -434,20 +474,33 @@ func TestParsingVulnerabilities(t *testing.T) {
 
 		// Base64 encode the parts
 		headerB64, err := base64.Encode([]byte(validHeader))
-		require.NoError(t, err)
-		require.NotEmpty(t, headerB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(headerB64) == 0 {
+			t.Fatal("headerB64 is empty")
+		}
 		claimsB64, err := base64.Encode([]byte(invalidClaims))
-		require.NoError(t, err)
-		require.NotEmpty(t, claimsB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(claimsB64) == 0 {
+			t.Fatal("claimsB64 is empty")
+		}
 		sigB64, err := base64.Encode([]byte(validSig))
-		require.NoError(t, err)
-		require.NotEmpty(t, sigB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(sigB64) == 0 {
+			t.Fatal("sigB64 is empty")
+		}
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
 		_, err = jwt.ParseString(malformedToken)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to decode claims JSON")
+		if err == nil || !strings.Contains(err.Error(), "failed to decode claims JSON") {
+			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "failed to decode claims JSON")
+		}
 	})
 
 	t.Run("Invalid Time Claims", func(t *testing.T) {
@@ -457,20 +510,33 @@ func TestParsingVulnerabilities(t *testing.T) {
 		validSig := "signature"
 
 		headerB64, err := base64.Encode([]byte(validHeader))
-		require.NoError(t, err)
-		require.NotEmpty(t, headerB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(headerB64) == 0 {
+			t.Fatal("headerB64 is empty")
+		}
 		claimsB64, err := base64.Encode([]byte(invalidClaims))
-		require.NoError(t, err)
-		require.NotEmpty(t, claimsB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(claimsB64) == 0 {
+			t.Fatal("claimsB64 is empty")
+		}
 		sigB64, err := base64.Encode([]byte(validSig))
-		require.NoError(t, err)
-		require.NotEmpty(t, sigB64)
+		if err != nil {
+			t.Fatalf("base64.Encode() error = %v", err)
+		}
+		if len(sigB64) == 0 {
+			t.Fatal("sigB64 is empty")
+		}
 
 		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
 
 		_, err = jwt.ParseString(malformedToken)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid type")
+		if err == nil || !strings.Contains(err.Error(), "invalid type") {
+			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "invalid type")
+		}
 	})
 }
 
@@ -495,15 +561,18 @@ func TestAudienceValidation(t *testing.T) {
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithAllowedAudiences("expected-audience"),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 
 		// Should fail with wrong audience
 		err = token.Verify(
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithAllowedAudiences("wrong-audience"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "not allowed")
+		if err == nil || !strings.Contains(err.Error(), "not allowed") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "not allowed")
+		}
 	})
 
 	t.Run("Array Audience", func(t *testing.T) {
@@ -524,15 +593,18 @@ func TestAudienceValidation(t *testing.T) {
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithAllowedAudiences("aud2", "aud4"),
 		)
-		require.NoError(t, err)
+		if err != nil {
+			t.Fatalf("token.Verify() error = %v", err)
+		}
 
 		// Should fail if no audience matches
 		err = token.Verify(
 			jwt.WithKey(rsaKeyPair.public),
 			jwt.WithAllowedAudiences("aud4", "aud5"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "none of the requested audiences")
+		if err == nil || !strings.Contains(err.Error(), "none of the requested audiences") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "none of the requested audiences")
+		}
 	})
 
 	t.Run("Invalid Audience Type", func(t *testing.T) {
@@ -556,7 +628,8 @@ func TestAudienceValidation(t *testing.T) {
 			jwt.WithAllowedAlgorithms(jwa.None),
 			jwt.WithAllowedAudiences("any"),
 		)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid audience type")
+		if err == nil || !strings.Contains(err.Error(), "invalid audience type") {
+			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "invalid audience type")
+		}
 	})
 }
