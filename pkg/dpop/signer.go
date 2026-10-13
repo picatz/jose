@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -157,17 +156,4 @@ func (s *Signer) Proof(method, uri string, opts ProofOptions) (string, error) {
 		return "", fmt.Errorf("dpop: sign proof: %w", err)
 	}
 	return signed.String(), nil
-}
-
-// ProofForRequest returns a proof for r, using r.Method and r.URL. r.URL
-// must be absolute, as it is for client requests.
-func (s *Signer) ProofForRequest(r *http.Request, opts ProofOptions) (string, error) {
-	if r == nil || r.URL == nil {
-		return "", fmt.Errorf("dpop: nil request")
-	}
-	method := r.Method
-	if method == "" {
-		method = http.MethodGet
-	}
-	return s.Proof(method, r.URL.String(), opts)
 }

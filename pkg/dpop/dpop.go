@@ -12,8 +12,11 @@
 //     live in hardware (PIV, TPM, Secure Enclave) and never be exported.
 //   - [Verifier] checks a proof against a request, following every step of
 //     RFC 9449 §4.3, with optional nonce (§8, §9) and replay (§11.1) checks.
-//   - [Transport] is an [http.RoundTripper] that attaches proofs and
-//     retries once when a server asks for a fresh nonce.
+//   - Package [github.com/picatz/jose/pkg/dpop/dpophttp] connects both to
+//     net/http: a client Transport that attaches proofs and retries once
+//     when a server asks for a fresh nonce, and server request helpers.
+//
+// This package does not import net/http.
 //
 // # What DPoP does not do
 //

@@ -1,4 +1,4 @@
-package dpop
+package dpophttp
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/picatz/jose/pkg/dpop"
 )
 
 // Transport is an [http.RoundTripper] that attaches a fresh DPoP proof to
@@ -22,7 +24,7 @@ import (
 // Signer is required.
 type Transport struct {
 	// Signer mints the proofs.
-	Signer *Signer
+	Signer *dpop.Signer
 	// Base performs the requests; nil means [http.DefaultTransport].
 	Base http.RoundTripper
 	// AccessToken, when set, returns the DPoP-bound access token for a
@@ -45,7 +47,7 @@ func (t *Transport) nonce(key string) string {
 }
 
 func (t *Transport) remember(key string, resp *http.Response) (string, bool) {
-	nonce := resp.Header.Get(NonceHeaderName)
+	nonce := resp.Header.Get(dpop.NonceHeaderName)
 	if nonce == "" {
 		return "", false
 	}
@@ -62,7 +64,7 @@ func (t *Transport) remember(key string, resp *http.Response) (string, bool) {
 // RoundTrip implements [http.RoundTripper]. It does not modify req.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.Signer == nil {
-		return nil, fmt.Errorf("dpop: Transport has no Signer")
+		return nil, fmt.Errorf("dpophttp: Transport has no Signer")
 	}
 	base := t.Base
 	if base == nil {
@@ -72,7 +74,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if t.AccessToken != nil {
 		var err error
 		if token, err = t.AccessToken(req); err != nil {
-			return nil, fmt.Errorf("dpop: access token: %w", err)
+			return nil, fmt.Errorf("dpophttp: access token: %w", err)
 		}
 	}
 	key := origin(req)
@@ -96,7 +98,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func (t *Transport) send(base http.RoundTripper, req *http.Request, token, nonce string) (*http.Response, error) {
-	proof, err := t.Signer.ProofForRequest(req, ProofOptions{AccessToken: token, Nonce: nonce})
+	proof, err := ProofForRequest(t.Signer, req, dpop.ProofOptions{AccessToken: token, Nonce: nonce})
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +106,13 @@ func (t *Transport) send(base http.RoundTripper, req *http.Request, token, nonce
 	if req.GetBody != nil {
 		body, err := req.GetBody()
 		if err != nil {
-			return nil, fmt.Errorf("dpop: replay request body: %w", err)
+			return nil, fmt.Errorf("dpophttp: replay request body: %w", err)
 		}
 		out.Body = body
 	}
-	out.Header.Set(HeaderName, proof)
+	out.Header.Set(dpop.HeaderName, proof)
 	if token != "" {
-		out.Header.Set("Authorization", AuthorizationScheme+" "+token)
+		out.Header.Set("Authorization", dpop.AuthorizationScheme+" "+token)
 	}
 	return base.RoundTrip(out)
 }
@@ -123,7 +125,7 @@ func asksForNonce(resp *http.Response) bool {
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
 		for _, value := range resp.Header.Values("WWW-Authenticate") {
-			if strings.Contains(value, ErrorUseNonce) {
+			if strings.Contains(value, dpop.ErrorUseNonce) {
 				return true
 			}
 		}
@@ -136,7 +138,7 @@ func asksForNonce(resp *http.Response) bool {
 			io.Reader
 			io.Closer
 		}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
-		return bytes.Contains(head, []byte(ErrorUseNonce))
+		return bytes.Contains(head, []byte(dpop.ErrorUseNonce))
 	}
 	return false
 }

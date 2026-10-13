@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -326,38 +325,4 @@ func stringClaim(claims map[string]any, name string, required bool) (string, err
 		return "", invalidf("%q must be a non-empty string", name)
 	}
 	return s, nil
-}
-
-// FromRequest returns the proof in r's DPoP header. It rejects requests
-// with no proof or with more than one DPoP header (RFC 9449 §4.3 step 1).
-func FromRequest(r *http.Request) (string, error) {
-	values := r.Header.Values(HeaderName)
-	switch len(values) {
-	case 0:
-		return "", invalidf("missing %s header", HeaderName)
-	case 1:
-		if values[0] == "" {
-			return "", invalidf("empty %s header", HeaderName)
-		}
-		return values[0], nil
-	default:
-		return "", invalidf("more than one %s header", HeaderName)
-	}
-}
-
-// AccessTokenFromRequest returns the access token from an
-// "Authorization: DPoP <token>" header. The scheme is matched
-// case-insensitively.
-//
-// https://www.rfc-editor.org/rfc/rfc9449.html#section-7.1
-func AccessTokenFromRequest(r *http.Request) (string, error) {
-	values := r.Header.Values("Authorization")
-	if len(values) != 1 {
-		return "", fmt.Errorf("dpop: want exactly one Authorization header, got %d", len(values))
-	}
-	scheme, token, ok := strings.Cut(values[0], " ")
-	if !ok || !strings.EqualFold(scheme, AuthorizationScheme) || token == "" || strings.ContainsAny(token, " \t") {
-		return "", fmt.Errorf("dpop: Authorization header does not use the %s scheme", AuthorizationScheme)
-	}
-	return token, nil
 }
