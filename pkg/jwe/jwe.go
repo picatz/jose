@@ -1,5 +1,7 @@
-// Package jwe implements JSON Web Encryption (JWE) compact serialization as
-// defined in RFC 7516, with the key management and content encryption
+// Package jwe implements JSON Web Encryption (JWE) as defined in RFC 7516,
+// in the compact serialization and the JSON Serialization (general and
+// flattened, with multiple recipients: see [ParseJSON], [EncryptJSON] and
+// [JSON.Decrypt]), with the key management and content encryption
 // algorithms of RFC 7518 and the X25519 key agreement of RFC 8037.
 //
 // # Algorithms
@@ -288,13 +290,20 @@ func (m *Message) Decrypt(key any, opts DecryptOptions) ([]byte, error) {
 
 // contentKey recovers the content encryption key.
 func (m *Message) contentKey(alg jwa.Algorithm, enc jwa.ContentEncryption, size int, key any) ([]byte, error) {
+	return recoverContentKey(alg, enc, size, key, m.Header, m.EncryptedKey)
+}
+
+// recoverContentKey recovers the content encryption key for one recipient
+// from its JOSE Header h and encrypted key. It is shared by the compact and
+// JSON serializations.
+func recoverContentKey(alg jwa.Algorithm, enc jwa.ContentEncryption, size int, key any, h header.Parameters, encryptedKey []byte) ([]byte, error) {
 	switch alg {
 	case jwa.Direct:
 		shared, ok := key.([]byte)
 		if !ok {
 			return nil, fmt.Errorf("%w: %q needs a []byte key, got %T", ErrUnsupported, alg, key)
 		}
-		if len(m.EncryptedKey) != 0 {
+		if len(encryptedKey) != 0 {
 			return nil, fmt.Errorf("%w: %q must have an empty encrypted key", ErrMalformed, alg)
 		}
 		if len(shared) != size {
@@ -309,24 +318,24 @@ func (m *Message) contentKey(alg jwa.Algorithm, enc jwa.ContentEncryption, size 
 		if len(kek) != keyWrapSize(alg) {
 			return nil, errDecryption
 		}
-		return unwrapContentKey(kek, m.EncryptedKey, size)
+		return unwrapContentKey(kek, encryptedKey, size)
 	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		recipient, err := keyAgreement(key)
 		if err != nil {
 			return nil, err
 		}
-		z, apu, apv, err := m.agree(recipient)
+		z, apu, apv, err := agree(h, recipient)
 		if err != nil {
 			return nil, err
 		}
 		if alg == jwa.ECDHES {
-			if len(m.EncryptedKey) != 0 {
+			if len(encryptedKey) != 0 {
 				return nil, fmt.Errorf("%w: %q must have an empty encrypted key", ErrMalformed, alg)
 			}
 			return concatKDF(z, enc, apu, apv, size), nil
 		}
 		kek := concatKDF(z, alg, apu, apv, keyWrapSize(alg))
-		return unwrapContentKey(kek, m.EncryptedKey, size)
+		return unwrapContentKey(kek, encryptedKey, size)
 	case jwa.RSAOAEP, jwa.RSAOAEP256:
 		decrypter, ok := key.(crypto.Decrypter)
 		if !ok {
@@ -335,7 +344,7 @@ func (m *Message) contentKey(alg jwa.Algorithm, enc jwa.ContentEncryption, size 
 		if _, ok := decrypter.Public().(*rsa.PublicKey); !ok {
 			return nil, fmt.Errorf("%w: %q needs an RSA key", ErrUnsupported, alg)
 		}
-		cek, err := decrypter.Decrypt(rand.Reader, m.EncryptedKey, &rsa.OAEPOptions{Hash: oaepHash(alg)})
+		cek, err := decrypter.Decrypt(rand.Reader, encryptedKey, &rsa.OAEPOptions{Hash: oaepHash(alg)})
 		if err != nil || len(cek) != size {
 			// RFC 7516 §11.5: continue with a random key so a bad key and a
 			// bad tag fail the same way.
@@ -356,8 +365,8 @@ func unwrapContentKey(kek, wrapped []byte, size int) ([]byte, error) {
 }
 
 // agree performs the recipient side of ECDH-ES with the "epk" header.
-func (m *Message) agree(recipient KeyAgreement) (z, apu, apv []byte, err error) {
-	raw, ok := m.Header[EphemeralPublicKey].(map[string]any)
+func agree(h header.Parameters, recipient KeyAgreement) (z, apu, apv []byte, err error) {
+	raw, ok := h[EphemeralPublicKey].(map[string]any)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("%w: missing or invalid %q", ErrMalformed, EphemeralPublicKey)
 	}
@@ -380,10 +389,10 @@ func (m *Message) agree(recipient KeyAgreement) (z, apu, apv []byte, err error) 
 	if err != nil {
 		return nil, nil, nil, errDecryption
 	}
-	if apu, err = partyInfo(m.Header, AgreementPartyUInfo); err != nil {
+	if apu, err = partyInfo(h, AgreementPartyUInfo); err != nil {
 		return nil, nil, nil, err
 	}
-	if apv, err = partyInfo(m.Header, AgreementPartyVInfo); err != nil {
+	if apv, err = partyInfo(h, AgreementPartyVInfo); err != nil {
 		return nil, nil, nil, err
 	}
 	return z, apu, apv, nil
@@ -496,84 +505,12 @@ func Encrypt(h header.Parameters, plaintext []byte, key any) (string, error) {
 		return "", err
 	}
 
-	var cek, encryptedKey []byte
-	switch alg {
-	case jwa.Direct:
-		shared, ok := key.([]byte)
-		if !ok {
-			return "", fmt.Errorf("%w: %q needs a []byte key, got %T", ErrUnsupported, alg, key)
-		}
-		if len(shared) != content.keySize {
-			return "", fmt.Errorf("jwe: %q with %q needs a %d-byte key, got %d", alg, enc, content.keySize, len(shared))
-		}
-		cek = shared
-	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		kek, ok := key.([]byte)
-		if !ok {
-			return "", fmt.Errorf("%w: %q needs a []byte key, got %T", ErrUnsupported, alg, key)
-		}
-		if len(kek) != keyWrapSize(alg) {
-			return "", fmt.Errorf("jwe: %q needs a %d-byte key, got %d", alg, keyWrapSize(alg), len(kek))
-		}
-		if cek, err = randomBytes(content.keySize); err != nil {
-			return "", err
-		}
-		if encryptedKey, err = wrapKey(kek, cek); err != nil {
-			return "", err
-		}
-	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
-		recipient, err := toECDHPublic(key)
-		if err != nil {
-			return "", err
-		}
-		ephemeral, err := recipient.Curve().GenerateKey(rand.Reader)
-		if err != nil {
-			return "", err
-		}
-		z, err := ephemeral.ECDH(recipient)
-		if err != nil {
-			return "", fmt.Errorf("jwe: ECDH: %w", err)
-		}
-		epk, err := jwk.PublicValue(ephemeral.PublicKey())
-		if err != nil {
-			return "", err
-		}
+	cek, encryptedKey, epk, err := manageKey(alg, enc, key, protectedHeader, content, nil)
+	if err != nil {
+		return "", err
+	}
+	if epk != nil {
 		protectedHeader[EphemeralPublicKey] = epk
-		apu, err := partyInfo(protectedHeader, AgreementPartyUInfo)
-		if err != nil {
-			return "", err
-		}
-		apv, err := partyInfo(protectedHeader, AgreementPartyVInfo)
-		if err != nil {
-			return "", err
-		}
-		if alg == jwa.ECDHES {
-			cek = concatKDF(z, enc, apu, apv, content.keySize)
-			break
-		}
-		kek := concatKDF(z, alg, apu, apv, keyWrapSize(alg))
-		if cek, err = randomBytes(content.keySize); err != nil {
-			return "", err
-		}
-		if encryptedKey, err = wrapKey(kek, cek); err != nil {
-			return "", err
-		}
-	case jwa.RSAOAEP, jwa.RSAOAEP256:
-		public, ok := key.(*rsa.PublicKey)
-		if !ok {
-			return "", fmt.Errorf("%w: %q needs an *rsa.PublicKey, got %T", ErrUnsupported, alg, key)
-		}
-		if public.Size() < 256 {
-			return "", fmt.Errorf("jwe: %q needs an RSA key of at least 2048 bits", alg)
-		}
-		if cek, err = randomBytes(content.keySize); err != nil {
-			return "", err
-		}
-		if encryptedKey, err = rsa.EncryptOAEP(newOAEPHash(alg), rand.Reader, public, cek, nil); err != nil {
-			return "", err
-		}
-	default:
-		return "", fmt.Errorf("%w: key management algorithm %q", ErrUnsupported, alg)
 	}
 
 	headerJSON, err := json.Marshal(protectedHeader)
@@ -596,4 +533,97 @@ func Encrypt(h header.Parameters, plaintext []byte, key any) (string, error) {
 		encodeSegment(ciphertext),
 		encodeSegment(tag),
 	}, "."), nil
+}
+
+// manageKey performs the sender side of key management for one recipient.
+// h is the recipient's combined JOSE Header, which supplies "apu" and
+// "apv". For "dir" and "ECDH-ES" the returned content key is the shared or
+// derived one and cek is ignored; for the wrapping algorithms cek is wrapped,
+// or generated when nil. A non-nil epk must be added to the header.
+func manageKey(alg jwa.Algorithm, enc jwa.ContentEncryption, key any, h header.Parameters, content contentCipher, cek []byte) (contentKey, encryptedKey []byte, epk map[string]any, err error) {
+	newCEK := func() error {
+		if cek != nil {
+			return nil
+		}
+		cek, err = randomBytes(content.keySize)
+		return err
+	}
+	switch alg {
+	case jwa.Direct:
+		shared, ok := key.([]byte)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%w: %q needs a []byte key, got %T", ErrUnsupported, alg, key)
+		}
+		if len(shared) != content.keySize {
+			return nil, nil, nil, fmt.Errorf("jwe: %q with %q needs a %d-byte key, got %d", alg, enc, content.keySize, len(shared))
+		}
+		return shared, nil, nil, nil
+	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
+		kek, ok := key.([]byte)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%w: %q needs a []byte key, got %T", ErrUnsupported, alg, key)
+		}
+		if len(kek) != keyWrapSize(alg) {
+			return nil, nil, nil, fmt.Errorf("jwe: %q needs a %d-byte key, got %d", alg, keyWrapSize(alg), len(kek))
+		}
+		if err := newCEK(); err != nil {
+			return nil, nil, nil, err
+		}
+		if encryptedKey, err = wrapKey(kek, cek); err != nil {
+			return nil, nil, nil, err
+		}
+		return cek, encryptedKey, nil, nil
+	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
+		recipient, err := toECDHPublic(key)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		ephemeral, err := recipient.Curve().GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		z, err := ephemeral.ECDH(recipient)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("jwe: ECDH: %w", err)
+		}
+		if epk, err = jwk.PublicValue(ephemeral.PublicKey()); err != nil {
+			return nil, nil, nil, err
+		}
+		apu, err := partyInfo(h, AgreementPartyUInfo)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		apv, err := partyInfo(h, AgreementPartyVInfo)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if alg == jwa.ECDHES {
+			return concatKDF(z, enc, apu, apv, content.keySize), nil, epk, nil
+		}
+		kek := concatKDF(z, alg, apu, apv, keyWrapSize(alg))
+		if err := newCEK(); err != nil {
+			return nil, nil, nil, err
+		}
+		if encryptedKey, err = wrapKey(kek, cek); err != nil {
+			return nil, nil, nil, err
+		}
+		return cek, encryptedKey, epk, nil
+	case jwa.RSAOAEP, jwa.RSAOAEP256:
+		public, ok := key.(*rsa.PublicKey)
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%w: %q needs an *rsa.PublicKey, got %T", ErrUnsupported, alg, key)
+		}
+		if public.Size() < 256 {
+			return nil, nil, nil, fmt.Errorf("jwe: %q needs an RSA key of at least 2048 bits", alg)
+		}
+		if err := newCEK(); err != nil {
+			return nil, nil, nil, err
+		}
+		if encryptedKey, err = rsa.EncryptOAEP(newOAEPHash(alg), rand.Reader, public, cek, nil); err != nil {
+			return nil, nil, nil, err
+		}
+		return cek, encryptedKey, nil, nil
+	default:
+		return nil, nil, nil, fmt.Errorf("%w: key management algorithm %q", ErrUnsupported, alg)
+	}
 }

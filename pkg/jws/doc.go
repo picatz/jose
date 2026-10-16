@@ -6,6 +6,10 @@
 // signatures, each with its own header) and its flattened syntax (one
 // signature, as ACME uses).
 //
+// [ParseDetached] and [Signature.Detached] handle a detached payload
+// ("header..signature", RFC 7515 Appendix F), including the unencoded
+// payload option ("b64": false, RFC 7797) that only ParseDetached accepts.
+//
 // Signing takes any [crypto.Signer] for asymmetric algorithms, so keys held
 // in hardware sign like in-memory keys. Verification checks the key type
 // and curve against the algorithm, and an unsecured JWS ("alg" "none")

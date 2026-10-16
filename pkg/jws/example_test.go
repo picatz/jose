@@ -169,3 +169,30 @@ func ExampleSignJSON() {
 	// Output:
 	// next {"hello":"world"}
 }
+
+// A detached JWS leaves the payload out of the token, so the content can
+// travel on its own, here signed as is with "b64": false (RFC 7797).
+func ExampleParseDetached() {
+	key := []byte("example-hs256-secret-of-32-bytes")
+	body := []byte(`{"amount":"10.00"}`)
+
+	signed, err := jws.New(jws.Header{
+		header.Algorithm:              jwa.HS256,
+		header.Base64URLEncodePayload: false,
+		header.Critical:               []string{header.Base64URLEncodePayload},
+	}, body, key)
+	if err != nil {
+		panic(err)
+	}
+	token, err := signed.Detached()
+	if err != nil {
+		panic(err)
+	}
+
+	received, err := jws.ParseDetached(token, body)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(received.Verify(key) == nil)
+	// Output: true
+}

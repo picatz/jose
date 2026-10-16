@@ -119,6 +119,13 @@ const (
 	// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11
 	Critical Registered = "crit"
 
+	// Base64URLEncodePayload "b64" says whether the JWS Payload is
+	// base64url-encoded (true, the default) or used as is (false). When it is
+	// false it must also be listed in "crit".
+	//
+	// https://www.rfc-editor.org/rfc/rfc7797#section-3
+	Base64URLEncodePayload Registered = "b64"
+
 	// EncryptionAlgorithm "enc" is the encryption algorithm used to encrypt
 	// the "plaintext" to produce the "ciphertext".
 	//

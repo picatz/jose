@@ -3,20 +3,26 @@ name: Test
 on:
   push:
     branches:
-    - main 
+      - main
   pull_request:
     branches:
-    - main
+      - main
   schedule:
-  - cron: "0 9 * * *"
+    - cron: "0 9 * * *"
+
+permissions:
+  contents: read
 
 jobs:
   go:
     name: "Go"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./...
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race ./...

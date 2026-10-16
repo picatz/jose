@@ -227,3 +227,10 @@ func BenchmarkValidateAlgorithm(b *testing.B) {
 		}
 	})
 }
+
+func TestValidateAlgorithm_ES256KNotImplemented(t *testing.T) {
+	err := jwa.ValidateAlgorithm(jwa.ES256K, []jwa.Algorithm{jwa.ES256K})
+	if !errors.Is(err, jwa.ErrUnknownAlgorithm) {
+		t.Fatalf("ValidateAlgorithm(ES256K) error = %v, want ErrUnknownAlgorithm", err)
+	}
+}
