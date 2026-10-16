@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
@@ -58,6 +59,11 @@ func ParseDetached(input string, payload []byte) (*Signature, error) {
 	headerBytes, err := base64.Decode(encodedHeader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode header: %w", err)
+	}
+	// encoding/json would replace invalid UTF-8 with U+FFFD, exposing a
+	// header that differs from the signed bytes.
+	if !utf8.Valid(headerBytes) {
+		return nil, errors.New("header is not valid UTF-8")
 	}
 	h, err := parseHeaderStrict(headerBytes)
 	if err != nil {

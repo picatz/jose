@@ -125,6 +125,7 @@ func TestUnencodedPayloadRefusals(t *testing.T) {
 		"b64 not boolean": `{"alg":"HS256","b64":"false","crit":["b64"]}`,
 		"unknown crit":    `{"alg":"HS256","b64":false,"crit":["b64","exp-ext"],"exp-ext":1}`,
 		"no alg":          `{"b64":false,"crit":["b64"]}`,
+		"invalid UTF-8":   "{\"alg\":\"HS256\",\"b64\":false,\"crit\":[\"b64\"],\"x\":\"\xff\"}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := jws.ParseDetached(encode(t, h)+".."+sig, []byte(rfc7797Payload)); err == nil {
