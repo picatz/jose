@@ -134,15 +134,15 @@ const None Algorithm = "none"
 // https://datatracker.ietf.org/doc/html/rfc8037#section-3.1
 const EdDSA Algorithm = "EdDSA"
 
-//	ECDSA with secp256k1 and SHA-256 (used in Bitcoin and Ethereum).
+// ECDSA using secp256k1 and SHA-256, registered by RFC 8812.
 //
-// # Warning
+// # Not implemented
 //
-// This algorithm is not implemented in this library, but is included
-// for completeness and documentation purposes.
+// The Go standard library has no secp256k1 curve, and this module takes no
+// dependencies, so ES256K is named only so callers can recognize it.
+// [ValidateAlgorithm] rejects it, and signing or verifying with it fails.
 //
-// https://datatracker.ietf.org/doc/html/draft-jones-webauthn-secp256k1
-// https://datatracker.ietf.org/doc/html/draft-ietf-cose-webauthn-algorithms-04#section-3.2
+// https://www.rfc-editor.org/rfc/rfc8812#section-3.2
 const ES256K Algorithm = "ES256K"
 
 // knownAlgorithms is a slice of algorithms that are recognized and supported
