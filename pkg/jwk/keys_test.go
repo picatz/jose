@@ -202,3 +202,16 @@ func TestThumbprintRejectsMalformedMembers(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicKeyRejectsOversizedRSA(t *testing.T) {
+	n := make([]byte, jwk.MaxRSAModulusBytes+1)
+	n[0], n[len(n)-1] = 0xc5, 0x01
+	encoded, _ := base64.Encode(n)
+	maximal, _ := base64.Encode(n[:jwk.MaxRSAModulusBytes])
+	if _, err := jwk.PublicKey(jwk.Value{jwk.KeyType: "RSA", jwk.N: encoded, jwk.E: "AQAB"}); !errors.Is(err, jwk.ErrInvalidKey) {
+		t.Fatalf("PublicKey() of a %d-bit modulus error = %v, want ErrInvalidKey", len(n)*8, err)
+	}
+	if _, err := jwk.PublicKey(jwk.Value{jwk.KeyType: "RSA", jwk.N: maximal, jwk.E: "AQAB"}); err != nil {
+		t.Fatalf("PublicKey() of an 8192-bit modulus error = %v", err)
+	}
+}

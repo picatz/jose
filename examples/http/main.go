@@ -10,6 +10,7 @@ import (
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
+	"github.com/picatz/jose/pkg/jwt/jwthttp"
 )
 
 func main() {
@@ -39,7 +40,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		bearerToken, err := jwt.FromHTTPAuthorizationHeader(r)
+		bearerToken, err := jwthttp.BearerToken(r)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return

@@ -126,3 +126,22 @@ func FromPublicKey(key any) (string, error) {
 	}
 	return GenerateString(value, crypto.SHA256)
 }
+
+// URNPrefix starts a SHA-256 JWK Thumbprint URI (RFC 9278), the form a JWT
+// uses to name a key in a string claim such as "iss" or "sub".
+//
+// https://www.rfc-editor.org/rfc/rfc9278.html#section-3
+const URNPrefix = "urn:ietf:params:oauth:jwk-thumbprint:sha-256:"
+
+// URN returns the SHA-256 JWK Thumbprint URI of a public key, a private key
+// or a [crypto.Signer], such as
+// "urn:ietf:params:oauth:jwk-thumbprint:sha-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs".
+//
+// https://www.rfc-editor.org/rfc/rfc9278.html
+func URN(key any) (string, error) {
+	jkt, err := FromPublicKey(key)
+	if err != nil {
+		return "", err
+	}
+	return URNPrefix + jkt, nil
+}
