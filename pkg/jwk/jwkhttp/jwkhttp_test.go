@@ -5,14 +5,21 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/picatz/jose/pkg/jwk"
 )
 
-// createTestHTTPContext creates a context and HTTP client for testing external JWK endpoints.
+// createTestHTTPContext creates a context and HTTP client for testing external
+// JWK endpoints. These tests reach the internet, so they are skipped under
+// go test -short.
 func createTestHTTPContext(t *testing.T, timeout time.Duration) (context.Context, *http.Client) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping test that fetches a public JWK Set in -short mode")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	client := &http.Client{
 		Transport: http.DefaultTransport,
@@ -181,35 +188,36 @@ func TestGitHubActionsWellKnownKeys(t *testing.T) {
 }
 
 func TestURLSetCache(t *testing.T) {
+	const body = `{"keys":[{"kty":"oct","kid":"k1","k":"c2VjcmV0LWtleS1vZi1hdC1sZWFzdC0zMi1ieXRlcyE"}]}`
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
-	cache := NewURLSetCache(http.DefaultClient, 24*time.Hour, 6*time.Hour)
+	cache := NewURLSetCache(srv.Client(), 24*time.Hour, 6*time.Hour)
 
-	go func() {
-		err := cache.Start(ctx)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	ghaJWKsURL := "https://token.actions.githubusercontent.com/.well-known/jwks"
-
-	set, err := cache.Get(ctx, ghaJWKsURL)
+	set, err := cache.Get(ctx, srv.URL)
 	if err != nil {
 		t.Fatalf("cache.Get() error = %v", err)
 	}
-	if len(set.Keys) == 0 {
-		t.Fatal("set.Keys is empty")
+	if len(set.Keys) != 1 {
+		t.Fatalf("len(set.Keys) = %d, want 1", len(set.Keys))
 	}
 
-	firstKeyID := set.Keys[0][jwk.KeyID].(string)
-
-	firstKey, err := cache.GetKey(ctx, ghaJWKsURL, firstKeyID)
+	key, err := cache.GetKey(ctx, srv.URL, "k1")
 	if err != nil {
 		t.Fatalf("cache.GetKey() error = %v", err)
 	}
-	if len(firstKey) == 0 {
-		t.Fatal("firstKey is empty")
+	if len(key) == 0 {
+		t.Fatal("key is empty")
+	}
+	if hits != 1 {
+		t.Fatalf("server hits = %d, want 1 (second lookup should come from the cache)", hits)
 	}
 }
