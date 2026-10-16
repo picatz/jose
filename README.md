@@ -14,7 +14,7 @@ $ go get github.com/picatz/jose@latest
 | --- | --- |
 | [`jwt`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwt) | Create, parse and verify JSON Web Tokens, with algorithm allow-lists and claim checks |
 | [`jws`](https://pkg.go.dev/github.com/picatz/jose/pkg/jws) | Sign and verify JWS with any `crypto.Signer`, compact or JSON (general and flattened), with detached and unencoded (RFC 7797) payloads |
-| [`jwe`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwe) | Encrypt and decrypt compact JWE: ECDH-ES, RSA-OAEP, AES key wrap, `dir`; GCM and CBC-HS |
+| [`jwe`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwe) | Encrypt and decrypt compact and JSON (general/flattened, multi-recipient) JWE: ECDH-ES, RSA-OAEP, AES key wrap, `dir`; GCM and CBC-HS |
 | [`jwk`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk) | Parse and emit JWKs and JWK Sets strictly; [`thumbprint`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk/thumbprint) computes RFC 7638 thumbprints |
 | [`jwk/jwkhttp`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk/jwkhttp) | Fetch and cache a JWK Set from a URL you trust |
 | [`dpop`](https://pkg.go.dev/github.com/picatz/jose/pkg/dpop) | Mint DPoP proofs and verify them, with replay, nonce and token binding checks |
