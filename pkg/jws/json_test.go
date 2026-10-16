@@ -354,3 +354,10 @@ func TestJSONVerifyCoversCurrentFields(t *testing.T) {
 		t.Fatal("Compact accepted a signature without a protected header")
 	}
 }
+
+func TestParseJSONRefusesInvalidUTF8(t *testing.T) {
+	data := []byte("{\"payload\":\"YQ\",\"protected\":\"eyJhbGciOiJFUzI1NiJ9\",\"header\":{\"kid\":\"\xff\"},\"signature\":\"AA\"}")
+	if _, err := jws.ParseJSON(data); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("ParseJSON() error = %v, want a UTF-8 refusal", err)
+	}
+}

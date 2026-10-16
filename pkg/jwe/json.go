@@ -137,6 +137,11 @@ type jsonWireRecip struct {
 // recipient because they fix the CEK. Unknown top-level members are
 // ignored.
 func ParseJSON(data []byte) (*JSON, error) {
+	// encoding/json would replace invalid UTF-8 in an unprotected header
+	// with U+FFFD, exposing values that differ from the wire.
+	if !utf8.Valid(data) {
+		return nil, fmt.Errorf("%w: JSON serialization is not UTF-8", ErrMalformed)
+	}
 	if err := strictjson.CheckDuplicates(data); err != nil {
 		return nil, fmt.Errorf("%w: JSON serialization: %v", ErrMalformed, err)
 	}
@@ -387,16 +392,20 @@ func (j *JSON) authenticatedData() string {
 // encodedProtected returns the protected header's encoding as received (or
 // as encrypted) while Protected still holds what it says, else a fresh
 // encoding of Protected.
+//
+// An explicitly empty protected header ("e30", "{}") is kept: it is part of
+// the authenticated data, so it cannot be treated as absent.
 func (j *JSON) encodedProtected() string {
-	if len(j.Protected) == 0 {
-		return ""
-	}
 	if j.protected != "" {
 		if decoded, err := base64.Decode(j.protected); err == nil {
-			if parsed, err := parseProtectedHeader(decoded); err == nil && reflect.DeepEqual(parsed, j.Protected) {
+			if parsed, err := parseProtectedHeader(decoded); err == nil &&
+				(len(parsed) == 0 && len(j.Protected) == 0 || reflect.DeepEqual(parsed, j.Protected)) {
 				return j.protected
 			}
 		}
+	}
+	if len(j.Protected) == 0 {
+		return ""
 	}
 	protectedJSON, err := json.Marshal(j.Protected)
 	if err != nil {
@@ -479,7 +488,7 @@ func EncryptJSON(protected, unprotected header.Parameters, plaintext, aad []byte
 		}
 	}
 
-	if len(j.Protected) > 0 {
+	if j.Protected != nil {
 		protectedJSON, err := json.Marshal(j.Protected)
 		if err != nil {
 			return nil, fmt.Errorf("jwe: encode protected header: %w", err)

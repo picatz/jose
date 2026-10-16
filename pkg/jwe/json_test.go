@@ -425,3 +425,43 @@ func TestJSONEncMismatchAndWrongKeyType(t *testing.T) {
 		t.Fatal("general syntax expected")
 	}
 }
+
+// An explicitly empty protected header ("e30") is authenticated data, so it
+// must survive serialization and parsing rather than be treated as absent.
+func TestJSONEmptyProtectedHeader(t *testing.T) {
+	key := make([]byte, 16)
+	rand.Read(key)
+	j, err := jwe.EncryptJSON(header.Parameters{},
+		header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM},
+		[]byte("empty protected"), nil,
+		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A128KW}, Key: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := j.General()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(wire, []byte(`"protected":"e30"`)) {
+		t.Fatalf("General() = %s, want protected \"e30\"", wire)
+	}
+	parsed, err := jwe.ParseJSON(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, _, err := parsed.Decrypt(key, jwe.DecryptOptions{})
+	if err != nil || string(plaintext) != "empty protected" {
+		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
+	}
+	again, err := parsed.Flattened()
+	if err != nil || !bytes.Contains(again, []byte(`"protected":"e30"`)) {
+		t.Fatalf("Flattened() = %s, %v; want protected \"e30\" kept", again, err)
+	}
+}
+
+func TestJSONRefusesInvalidUTF8(t *testing.T) {
+	data := []byte("{\"unprotected\":{\"enc\":\"A128GCM\"},\"header\":{\"alg\":\"A128KW\",\"kid\":\"\xff\"},\"encrypted_key\":\"AA\",\"iv\":\"AA\",\"ciphertext\":\"AA\",\"tag\":\"AA\"}")
+	if _, err := jwe.ParseJSON(data); !errors.Is(err, jwe.ErrMalformed) {
+		t.Fatalf("ParseJSON() error = %v, want ErrMalformed", err)
+	}
+}

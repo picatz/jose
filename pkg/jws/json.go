@@ -166,6 +166,11 @@ type jsonWireSig struct {
 // (§4.1.11), so any "crit" is refused. Detached payloads (RFC 7515
 // Appendix F) and unencoded payloads (RFC 7797) are not supported.
 func ParseJSON(data []byte) (*JSON, error) {
+	// encoding/json would replace invalid UTF-8 in an unprotected header
+	// with U+FFFD, exposing values that differ from the wire.
+	if !utf8.Valid(data) {
+		return nil, errors.New("jws: JSON serialization is not UTF-8")
+	}
 	if err := strictjson.CheckDuplicates(data); err != nil {
 		return nil, fmt.Errorf("jws: invalid JSON serialization: %w", err)
 	}
