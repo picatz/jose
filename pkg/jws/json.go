@@ -261,6 +261,13 @@ func checkJSONHeaders(protected, unprotected Header) error {
 	if _, ok := unprotected[header.Critical]; ok {
 		return errors.New(`"crit" must be integrity protected`)
 	}
+	// The unencoded payload option (RFC 7797) is supported only for a
+	// detached compact JWS; see ParseDetached.
+	for _, h := range []Header{protected, unprotected} {
+		if _, ok := h[header.Base64URLEncodePayload]; ok {
+			return fmt.Errorf("header parameter %q is not supported in the JSON serialization", header.Base64URLEncodePayload)
+		}
+	}
 	return processCriticalHeaders(protected)
 }
 

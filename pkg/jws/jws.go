@@ -56,6 +56,14 @@ type Signature struct {
 	// raw is the original string representation of the JWS if parsed,
 	// or the computed string representation if constructed.
 	raw string
+
+	// encodedHeader is the protected header exactly as received by
+	// [ParseDetached] for an unencoded payload, which has no raw form.
+	encodedHeader string
+
+	// unencoded is set when the payload is signed as is ("b64": false,
+	// RFC 7797) rather than base64url-encoded.
+	unencoded bool
 }
 
 // New creates a new JWS token with the given header, payload, and signs it
@@ -120,6 +128,14 @@ func Parse(input string) (*Signature, error) {
 		return nil, fmt.Errorf("missing or invalid algorithm parameter: %w", err)
 	}
 
+	// An unencoded payload ("b64": false) is accepted only by ParseDetached,
+	// so a caller has to opt in to RFC 7797.
+	if unencoded, err := unencodedPayload(header); err != nil {
+		return nil, err
+	} else if unencoded {
+		return nil, fmt.Errorf("unencoded payload (%q false) needs ParseDetached", "b64")
+	}
+
 	// Process critical header parameters per RFC 7515 Section 4.1.11
 	if err := processCriticalHeaders(header); err != nil {
 		return nil, fmt.Errorf("critical header validation failed: %w", err)
@@ -162,18 +178,53 @@ func Parse(input string) (*Signature, error) {
 
 // String returns the compact serialization representation of the JWS token.
 // Format: base64url(header).base64url(payload).base64url(signature)
+//
+// A JWS with an unencoded payload ("b64": false) has no attached form here,
+// so String returns its detached form, "header..signature".
 func (t *Signature) String() string {
-	if t.raw != "" {
-		return t.raw
-	}
-
-	str, err := t.computeString()
+	str, err := t.compact()
 	if err != nil {
 		// This should not happen in normal circumstances
 		return ""
 	}
 
 	return str
+}
+
+// compact returns the compact serialization, computing it if needed.
+func (t *Signature) compact() (string, error) {
+	if t.raw != "" {
+		return t.raw, nil
+	}
+	if t.unencoded {
+		encodedHeader, err := t.protectedSegment()
+		if err != nil {
+			return "", err
+		}
+		signatureB64, err := base64.Encode(t.Signature)
+		if err != nil {
+			return "", fmt.Errorf("failed to encode signature: %w", err)
+		}
+		return encodedHeader + ".." + signatureB64, nil
+	}
+	return t.computeString()
+}
+
+// protectedSegment returns the encoded protected header: as received when
+// parsed, otherwise freshly marshaled.
+func (t *Signature) protectedSegment() (string, error) {
+	if t.encodedHeader != "" {
+		return t.encodedHeader, nil
+	}
+	headerBytes, err := json.Marshal(t.Header)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal header: %w", err)
+	}
+	headerB64, err := base64.Encode(headerBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode header: %w", err)
+	}
+	return headerB64, nil
 }
 
 // computeString computes the string representation of the JWS token.
@@ -220,7 +271,17 @@ func (t *Signature) computeString() (string, error) {
 // re-serializing them would change the signing input. See
 // https://www.rfc-editor.org/rfc/rfc7515.html#section-5.2 (steps 1-8 operate
 // on the received encoded values).
+//
+// With an unencoded payload ("b64": false) the payload octets follow the
+// '.' as they are (https://www.rfc-editor.org/rfc/rfc7797#section-3).
 func (t *Signature) signingInput() (string, error) {
+	if t.unencoded {
+		encodedHeader, err := t.protectedSegment()
+		if err != nil {
+			return "", err
+		}
+		return encodedHeader + "." + string(t.Payload), nil
+	}
 	if t.raw != "" {
 		if i := strings.LastIndexByte(t.raw, '.'); i > 0 {
 			return t.raw[:i], nil
@@ -275,6 +336,14 @@ func (t *Signature) Sign(key any) ([]byte, error) {
 	// Signing always covers the current Header and Payload, never the
 	// encoding a parsed token arrived with.
 	t.raw = ""
+	t.encodedHeader = ""
+	t.unencoded, err = unencodedPayload(t.Header)
+	if err != nil {
+		return nil, err
+	}
+	if t.unencoded && alg == jwa.None {
+		return nil, fmt.Errorf("alg %q cannot sign an unencoded payload", alg)
+	}
 
 	signingInput, err := t.signingInput()
 	if err != nil {
@@ -416,7 +485,8 @@ func processCriticalHeaders(h Header) error {
 	// Use the shared critical header validation logic
 	// For JWS, we don't define any supported critical headers by default,
 	// so we pass nil to reject any critical headers (per RFC 7515).
-	return h.ValidateCriticalHeaders(nil)
+	// "b64" (RFC 7797) is understood: unencodedPayload enforces it.
+	return h.ValidateCriticalHeaders([]string{header.Base64URLEncodePayload})
 }
 
 // HMAC signing and verification
