@@ -92,6 +92,22 @@ func New(header Header, payload []byte, key any) (*Signature, error) {
 // 4. Process critical header parameters
 // 5. Decode payload and signature
 func Parse(input string) (*Signature, error) {
+	return parse(input, nil)
+}
+
+// ParseCritical is [Parse] for a JWS whose "crit" header lists extension
+// parameters the caller implements (RFC 7515 §4.1.11). It accepts a "crit"
+// that names only understood parameters, all present in the header, and
+// refuses any other. ParseCritical checks only that they are present:
+// enforcing what they mean is the caller's job, which is why [Parse]
+// refuses them.
+//
+// https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.11
+func ParseCritical(input string, understood ...string) (*Signature, error) {
+	return parse(input, understood)
+}
+
+func parse(input string, understood []string) (*Signature, error) {
 	if len(input) == 0 {
 		return nil, fmt.Errorf("empty JWS string")
 	}
@@ -137,7 +153,7 @@ func Parse(input string) (*Signature, error) {
 	}
 
 	// Process critical header parameters per RFC 7515 Section 4.1.11
-	if err := processCriticalHeaders(header); err != nil {
+	if err := processCriticalHeaders(header, understood...); err != nil {
 		return nil, fmt.Errorf("critical header validation failed: %w", err)
 	}
 
@@ -481,12 +497,11 @@ func parseHeaderStrict(data []byte) (Header, error) {
 }
 
 // processCriticalHeaders implements RFC 7515 Section 4.1.11 critical header processing
-func processCriticalHeaders(h Header) error {
-	// Use the shared critical header validation logic
-	// For JWS, we don't define any supported critical headers by default,
-	// so we pass nil to reject any critical headers (per RFC 7515).
-	// "b64" (RFC 7797) is understood: unencodedPayload enforces it.
-	return h.ValidateCriticalHeaders([]string{header.Base64URLEncodePayload})
+//
+// "b64" (RFC 7797) is always understood: unencodedPayload enforces it.
+// understood adds extensions the caller enforces (see [ParseCritical]).
+func processCriticalHeaders(h Header, understood ...string) error {
+	return h.ValidateCriticalHeaders(append([]string{header.Base64URLEncodePayload}, understood...))
 }
 
 // HMAC signing and verification

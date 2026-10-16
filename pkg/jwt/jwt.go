@@ -9,7 +9,6 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -1368,45 +1367,6 @@ func splitToken(token string) ([3]string, error) {
 	}
 
 	return [3]string{parts[0], parts[1], parts[2]}, nil
-}
-
-// FromHTTPAuthorizationHeader extracts a JWT string from the Authorization header of an HTTP request.
-// If the Authorization header is not set, then an error is returned.
-//
-// # Warning
-//
-// This value needs to be parsed and verified before it can be used safely.
-func FromHTTPAuthorizationHeader(r *http.Request) (string, error) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return "", fmt.Errorf("missing authorization header")
-	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid authorization header format")
-	}
-
-	if strings.ToLower(parts[0]) != "bearer" {
-		return "", fmt.Errorf("invalid authorization header format")
-	}
-
-	return parts[1], nil
-}
-
-// HTTPHeaderValue is a type that can be used as a value when setting
-// an HTTP request header.
-type HTTPHeaderValue interface {
-	string | *Token
-}
-
-// SetHTTPAuthorizationHeader sets the Authorization header of an HTTP request
-// to the given JWT. The JWT is prefixed with "Bearer ", as required by the
-// HTTP Authorization header specification.
-//
-// https://tools.ietf.org/html/rfc6750#section-2.1
-func SetHTTPAuthorizationHeader[T HTTPHeaderValue](r *http.Request, jwt T) {
-	r.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
 }
 
 // contextKey is a type used to store values in a context object.

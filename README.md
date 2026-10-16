@@ -16,12 +16,15 @@ $ go get github.com/picatz/jose@latest
 | [`jws`](https://pkg.go.dev/github.com/picatz/jose/pkg/jws) | Sign and verify JWS with any `crypto.Signer`, compact or JSON (general and flattened), with detached and unencoded (RFC 7797) payloads |
 | [`jwe`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwe) | Encrypt and decrypt compact and JSON (general/flattened, multi-recipient) JWE: ECDH-ES, RSA-OAEP, AES key wrap, `dir`; GCM and CBC-HS |
 | [`jwk`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk) | Parse and emit JWKs and JWK Sets strictly; [`thumbprint`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk/thumbprint) computes RFC 7638 thumbprints |
+| [`jwt/jwthttp`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwt/jwthttp) | Read and set bearer tokens in HTTP Authorization headers |
 | [`jwk/jwkhttp`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwk/jwkhttp) | Fetch and cache a JWK Set from a URL you trust |
 | [`dpop`](https://pkg.go.dev/github.com/picatz/jose/pkg/dpop) | Mint DPoP proofs and verify them, with replay, nonce and token binding checks |
 | [`dpop/dpophttp`](https://pkg.go.dev/github.com/picatz/jose/pkg/dpop/dpophttp) | An `http.RoundTripper` that adds proofs and retries on `use_dpop_nonce` |
+| [`jwtchain`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwtchain) | Attenuation chains: capability tokens any holder can narrow offline (fewer audiences and scopes, sooner expiry, caveats, a new holder key), linked by digest or embedded, verified back to the issuer, and re-issued with RFC 8693 `act` lineage |
+| [`ni`](https://pkg.go.dev/github.com/picatz/jose/pkg/ni) | Named Information URIs (RFC 6920), digests that name content, such as one token referring to another |
 | [`jwa`](https://pkg.go.dev/github.com/picatz/jose/pkg/jwa), [`header`](https://pkg.go.dev/github.com/picatz/jose/pkg/header) | Algorithm identifiers and header parameters |
 
-`jws`, `jwe`, `jwk`, `thumbprint`, `dpop`, `jwa` and `header` do not import `net/http`, so offline programs link no HTTP client. `jwt` imports it for `FromHTTPAuthorizationHeader`.
+None of the packages above import `net/http` except the `*http` helpers, so offline programs link no HTTP code.
 
 ## Example Usage
 
@@ -51,7 +54,7 @@ if err != nil {
 mux := http.NewServeMux()
 
 mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	bearerToken, err := jwt.FromHTTPAuthorizationHeader(r)
+	bearerToken, err := jwthttp.BearerToken(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -101,8 +104,12 @@ if err != nil {
 - [RFC7517](https://datatracker.ietf.org/doc/html/rfc7517) (**JWK**) JSON Web Key
 - [RFC7518](https://datatracker.ietf.org/doc/html/rfc7518) (**JWA**) JSON Web Algorithms
 - [RFC7519](https://datatracker.ietf.org/doc/html/rfc7519) (**JWT**) JSON Web Token
+- [RFC6920](https://datatracker.ietf.org/doc/html/rfc6920) Naming Things with Hashes (`ni` URIs)
 - [RFC7638](https://datatracker.ietf.org/doc/html/rfc7638) JSON Web Key (JWK) Thumbprint
+- [RFC7800](https://datatracker.ietf.org/doc/html/rfc7800) Proof-of-Possession Key Semantics for JWTs (`cnf`)
 - [RFC8037](https://datatracker.ietf.org/doc/html/rfc8037) (**OKP**) Ed25519 signatures and X25519 key agreement
+- [RFC8693](https://datatracker.ietf.org/doc/html/rfc8693) OAuth 2.0 Token Exchange (`act` and `may_act`)
+- [RFC9278](https://datatracker.ietf.org/doc/html/rfc9278) JWK Thumbprint URI
 - [RFC9449](https://datatracker.ietf.org/doc/html/rfc9449) (**DPoP**) OAuth 2.0 Demonstrating Proof of Possession
 
 Asymmetric signing accepts any `crypto.Signer`, so keys held in hardware
