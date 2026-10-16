@@ -3,6 +3,7 @@ package jwtchain
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,8 @@ type Policy struct {
 	// "iss" and "typ" checks: the chain is only as trustworthy as its
 	// root. [RootKey] covers a single issuer key. Root need not check
 	// "exp", "nbf" or "aud"; the Policy checks them for the whole chain.
+	// Note that a root without "aud" is valid for every audience, so a
+	// link may narrow it to this verifier's: issue roots with "aud".
 	Root func(root string) (jwt.ClaimsSet, error)
 
 	// Audience is this verifier's identifier. The chain verifies only if
@@ -101,8 +104,7 @@ type Grant struct {
 	// Confirmation is the last token's "cnf" claim as given, or nil.
 	Confirmation map[string]any
 
-	signers    []string
-	rootActors []jwt.Party
+	signers []string
 }
 
 // HasScope reports whether the chain grants scope.
@@ -112,17 +114,18 @@ func (g *Grant) HasScope(scope string) bool {
 
 // Actors returns the chain's lineage as RFC 8693 actors, the current one
 // first: the holder of the last link, then each key that signed a link,
-// newest first, then any actors the root itself records. Each key is named
-// by its thumbprint URI (RFC 9278). A root alone has only the root's
-// actors.
+// newest first, then any actors the root itself records in "act". Each key
+// is named by its thumbprint URI (RFC 9278). A root alone has only the
+// root's actors. It fails only if the root's "act" claim is malformed.
 //
-// An issuer that re-issues a verified chain as a fresh token keeps the
-// lineage with [jwt.ClaimsSet.SetActors]:
-//
-//	err := claims.SetActors(grant.Actors())
+// An issuer that re-issues a chain keeps this lineage; see [Grant.Claims].
 //
 // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.1
-func (g *Grant) Actors() []jwt.Party {
+func (g *Grant) Actors() ([]jwt.Party, error) {
+	rootActors, err := g.Root.Actors()
+	if err != nil {
+		return nil, err
+	}
 	var actors []jwt.Party
 	if len(g.signers) > 0 && g.Holder != "" {
 		actors = append(actors, jwt.Party{Subject: thumbprintURN(g.Holder)})
@@ -130,7 +133,54 @@ func (g *Grant) Actors() []jwt.Party {
 	for _, signer := range slices.Backward(g.signers) {
 		actors = append(actors, jwt.Party{Subject: signer})
 	}
-	return append(actors, g.rootActors...)
+	return append(actors, rootActors...), nil
+}
+
+// Claims returns the claims for a fresh root that grants exactly what this
+// chain allows, for an issuer that re-issues a verified chain as one short
+// token. It starts from the root's claims and replaces what links narrowed:
+// "aud", "scope", "exp", "nbf", "cav" and "cnf", and records the lineage
+// as "act". "iat" and "jti" are removed for the issuer to set, and so is
+// "exp" when the chain sets none. The issuer may shorten "exp", never
+// lengthen it.
+//
+//	claims, err := grant.Claims()
+//	claims[jwt.IssuedAt], claims[jwt.JWTID] = now.Unix(), newID()
+func (g *Grant) Claims() (jwt.ClaimsSet, error) {
+	actors, err := g.Actors()
+	if err != nil {
+		return nil, err
+	}
+	claims := maps.Clone(g.Root)
+	for _, name := range []string{jwt.Audience, jwt.Scope, jwt.ExpirationTime, jwt.NotBefore, jwt.IssuedAt, jwt.JWTID, jwt.Confirmation, jwt.Actor, ClaimCaveats} {
+		delete(claims, name)
+	}
+	switch len(g.Audience) {
+	case 0:
+	case 1:
+		claims[jwt.Audience] = g.Audience[0]
+	default:
+		claims[jwt.Audience] = slices.Clone(g.Audience)
+	}
+	if g.Scope != nil {
+		claims[jwt.Scope] = strings.Join(g.Scope, " ")
+	}
+	if !g.Expiry.IsZero() {
+		claims[jwt.ExpirationTime] = g.Expiry.Unix()
+	}
+	if !g.NotBefore.IsZero() {
+		claims[jwt.NotBefore] = g.NotBefore.Unix()
+	}
+	if len(g.Caveats) > 0 {
+		claims[ClaimCaveats] = slices.Clone(g.Caveats)
+	}
+	if g.Confirmation != nil {
+		claims[jwt.Confirmation] = maps.Clone(g.Confirmation)
+	}
+	if err := claims.SetActors(actors); err != nil {
+		return nil, err
+	}
+	return claims, nil
 }
 
 // Verify parses input and verifies it with [Policy.VerifyChain].
@@ -159,6 +209,28 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 	if c.Links() > orDefault(p.MaxLinks, DefaultMaxLinks) {
 		return nil, fmt.Errorf("%w: more than %d links", ErrFormat, orDefault(p.MaxLinks, DefaultMaxLinks))
 	}
+	if size := len(c.String()); size > orDefault(p.MaxSize, DefaultMaxSize) {
+		return nil, fmt.Errorf("%w: larger than %d bytes", ErrFormat, orDefault(p.MaxSize, DefaultMaxSize))
+	}
+	now := time.Now
+	if p.Now != nil {
+		now = p.Now
+	}
+	leeway := p.Leeway
+	if leeway == 0 {
+		leeway = DefaultLeeway
+	}
+	current := now()
+	// Refuse an expired chain before spending any signature checks on it.
+	// The "exp" values read here are unverified, but a chain that claims
+	// to be expired fails either way.
+	for _, t := range c.tokens {
+		if v, ok := t.claims[jwt.ExpirationTime]; ok {
+			if expiry, err := numericDate(v, false); err == nil && !current.Add(-leeway).Before(expiry) {
+				return nil, fmt.Errorf("%w: expired at %s", ErrVerification, expiry.UTC().Format(time.RFC3339))
+			}
+		}
+	}
 	root, err := p.Root(c.Root())
 	if err != nil {
 		return nil, fmt.Errorf("%w: root: %w", ErrVerification, err)
@@ -183,15 +255,6 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 	if !p.AnyAudience && !slices.Contains(s.audience, p.Audience) {
 		return nil, fmt.Errorf("%w: not meant for audience %q", ErrVerification, p.Audience)
 	}
-	now := time.Now
-	if p.Now != nil {
-		now = p.Now
-	}
-	leeway := p.Leeway
-	if leeway == 0 {
-		leeway = DefaultLeeway
-	}
-	current := now()
 	if !s.notBefore.IsZero() && current.Add(leeway).Before(s.notBefore) {
 		return nil, fmt.Errorf("%w: not valid until %s", ErrVerification, s.notBefore.UTC().Format(time.RFC3339))
 	}

@@ -168,6 +168,9 @@ func ecdsaFromPoint(curve elliptic.Curve, point []byte) *ecdsa.PublicKey {
 	}
 }
 
+// MaxRSAModulusBytes bounds the RSA modulus a JWK may carry: 8192 bits.
+const MaxRSAModulusBytes = 1024
+
 // rsaPublic decodes and bounds the public members of an RSA JWK.
 func rsaPublic(v Value) (*rsa.PublicKey, error) {
 	n, err := member(v, N)
@@ -176,6 +179,11 @@ func rsaPublic(v Value) (*rsa.PublicKey, error) {
 	}
 	if n[0] == 0 {
 		return nil, invalid("%q has a leading zero byte", N)
+	}
+	// Verification cost grows with the modulus, and a key from a token
+	// header is attacker-chosen, so absurd sizes are refused.
+	if len(n) > MaxRSAModulusBytes {
+		return nil, invalid("RSA modulus is larger than %d bits", MaxRSAModulusBytes*8)
 	}
 	e, err := member(v, E)
 	if err != nil {

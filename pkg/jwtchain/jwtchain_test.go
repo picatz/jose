@@ -2,6 +2,7 @@ package jwtchain_test
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -109,6 +110,15 @@ func derive(t testing.TB, parent *jwtchain.Chain, key crypto.Signer, r jwtchain.
 	return c
 }
 
+func actorsOf(t testing.TB, g *jwtchain.Grant) []jwt.Party {
+	t.Helper()
+	actors, err := g.Actors()
+	if err != nil {
+		t.Fatalf("Actors() error = %v", err)
+	}
+	return actors
+}
+
 func urn(t testing.TB, key crypto.Signer) string {
 	t.Helper()
 	s, err := thumbprint.URN(key.Public())
@@ -128,7 +138,7 @@ func TestRootAlone(t *testing.T) {
 	if v.Subject != "alice" || v.Holder != jkt || len(v.Links) != 0 || !v.HasScope("delete") {
 		t.Fatalf("Verify() = %+v", v)
 	}
-	if actors := v.Actors(); len(actors) != 0 {
+	if actors := actorsOf(t, v); len(actors) != 0 {
 		t.Fatalf("Actors() = %+v, want none", actors)
 	}
 }
@@ -176,7 +186,7 @@ func TestDeriveNarrowsAndVerifies(t *testing.T) {
 	}
 
 	want := []jwt.Party{{Subject: urn(t, f.c)}, {Subject: urn(t, f.b)}, {Subject: urn(t, f.a)}}
-	if got := v.Actors(); !slices.EqualFunc(got, want, jwt.Party.Is) {
+	if got := actorsOf(t, v); !slices.EqualFunc(got, want, jwt.Party.Is) {
 		t.Fatalf("Actors() = %+v, want %+v", got, want)
 	}
 
@@ -222,8 +232,8 @@ func TestEmbed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
-	if v.Holder != "" || v.Confirmation != nil || len(v.Actors()) != 2 {
-		t.Fatalf("a bearer leaf: Holder = %q, Actors = %+v", v.Holder, v.Actors())
+	if v.Holder != "" || v.Confirmation != nil || len(actorsOf(t, v)) != 2 {
+		t.Fatalf("a bearer leaf: Holder = %q, Actors = %+v", v.Holder, actorsOf(t, v))
 	}
 
 	// A presenter may also send the embedded parents explicitly.
@@ -344,7 +354,7 @@ func TestVerifyRefusals(t *testing.T) {
 	exp := now.Add(time.Minute).Unix()
 	bJKT, _ := thumbprint.FromPublicKey(f.b.Public())
 	good := func() map[string]any {
-		return map[string]any{jwt.Issuer: urn(t, f.a), jwt.ExpirationTime: exp, jwt.Confirmation: map[string]any{"jkt": bJKT}}
+		return map[string]any{jwt.Issuer: urn(t, f.a), jwt.ExpirationTime: exp, jwt.JWTID: "link-1", jwt.Confirmation: map[string]any{"jkt": bJKT}}
 	}
 	with := func(name string, value any) map[string]any {
 		claims := good()
@@ -587,16 +597,13 @@ func TestReissueWithLineage(t *testing.T) {
 	}
 
 	// The issuer collapses the chain into a fresh root for the holder.
-	claims := jwt.ClaimsSet{
-		jwt.Issuer:         "https://issuer.example",
-		jwt.Subject:        v.Subject,
-		jwt.Audience:       v.Audience,
-		jwt.Scope:          strings.Join(v.Scope, " "),
-		jwt.ExpirationTime: v.Expiry.Unix(),
-		jwt.Confirmation:   v.Confirmation,
-	}
-	if err := claims.SetActors(v.Actors()); err != nil {
+	claims, err := v.Claims()
+	if err != nil {
 		t.Fatal(err)
+	}
+	claims[jwt.IssuedAt], claims[jwt.JWTID] = now.Unix(), "reissued-1"
+	if claims[jwt.Issuer] != "https://issuer.example" || claims[jwt.Subject] != "alice" || claims[jwt.Scope] != "read" || claims[jwt.ExpirationTime] != now.Add(10*time.Minute).Unix() {
+		t.Fatalf("Claims() = %v", claims)
 	}
 	reissued := f.mintRoot(t, claims)
 	again, err := f.policy().Verify(reissued)
@@ -621,7 +628,7 @@ func TestReissueWithLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []jwt.Party{{Subject: urn(t, f.c)}, {Subject: urn(t, f.b)}, {Subject: urn(t, f.b)}, {Subject: urn(t, f.a)}}
-	if got := nv.Actors(); !slices.EqualFunc(got, want, jwt.Party.Is) {
+	if got := actorsOf(t, nv); !slices.EqualFunc(got, want, jwt.Party.Is) {
 		t.Fatalf("Actors() = %+v, want %+v", got, want)
 	}
 }
@@ -668,4 +675,102 @@ func TestInspect(t *testing.T) {
 	if _, err := forged.Inspect(); !errors.Is(err, jwtchain.ErrVerification) {
 		t.Fatalf("Inspect(forged) error = %v", err)
 	}
+}
+
+// Findings from the security review, kept as regression tests.
+func TestReviewRegressions(t *testing.T) {
+	f := newFixture(t)
+
+	t.Run("non-canonical signature encoding", func(t *testing.T) {
+		c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: f.b.Public()})
+		leaf := c.Leaf()
+		// Flip the unused low bits of the last base64url character.
+		last := leaf[len(leaf)-1]
+		alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+		idx := strings.IndexByte(alphabet, last)
+		mutated := leaf[:len(leaf)-1] + string(alphabet[idx^1])
+		if _, err := f.policy().Verify(f.root + jwtchain.Separator + mutated); err == nil {
+			t.Fatal("Verify() accepted a second spelling of the same link")
+		}
+	})
+
+	t.Run("root scope splits on spaces only", func(t *testing.T) {
+		cnf, _ := jwtchain.Confirmation(f.a.Public())
+		root := parse(t, f.mintRoot(t, jwt.ClaimsSet{
+			jwt.Audience:       "https://api.example",
+			jwt.Scope:          "read\tadmin write",
+			jwt.ExpirationTime: now.Add(time.Hour).Unix(),
+			jwt.Confirmation:   cnf,
+		}))
+		if _, err := jwtchain.Derive(root, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Scope: []string{"admin"}}, jwtchain.WithClock(clock)); !errors.Is(err, jwtchain.ErrBroadens) {
+			t.Fatalf("Derive() of a tab-split scope error = %v, want ErrBroadens", err)
+		}
+		derive(t, root, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Scope: []string{"write"}, Holder: f.b.Public()})
+	})
+
+	t.Run("non-signing holders", func(t *testing.T) {
+		x25519, err := ecdh.X25519().GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := jwtchain.Confirmation(x25519.PublicKey()); err == nil {
+			t.Fatal("Confirmation() accepted an X25519 key")
+		}
+		if _, err := jwtchain.Derive(parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: x25519.PublicKey()}, jwtchain.WithClock(clock)); err == nil {
+			t.Fatal("Derive() accepted an X25519 holder")
+		}
+	})
+
+	t.Run("malformed root act only fails Actors", func(t *testing.T) {
+		cnf, _ := jwtchain.Confirmation(f.a.Public())
+		root := f.mintRoot(t, jwt.ClaimsSet{
+			jwt.Audience:       "https://api.example",
+			jwt.ExpirationTime: now.Add(time.Hour).Unix(),
+			jwt.Confirmation:   cnf,
+			jwt.Actor:          map[string]any{"sub": "svc", "exp": 1},
+		})
+		g, err := f.policy().Verify(root)
+		if err != nil {
+			t.Fatalf("Verify() error = %v", err)
+		}
+		if _, err := g.Actors(); !errors.Is(err, jwt.ErrActor) {
+			t.Fatalf("Actors() error = %v, want ErrActor", err)
+		}
+	})
+
+	t.Run("Claims carries caveats and nbf", func(t *testing.T) {
+		c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{
+			Expiry:    now.Add(10 * time.Minute),
+			NotBefore: now.Add(-time.Minute),
+			Caveats:   []string{"tenant:acme"},
+			Holder:    f.b.Public(),
+		})
+		policy := f.policy()
+		policy.Caveat = jwtchain.AcceptCaveats("tenant:acme")
+		g, err := policy.Verify(c.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := g.Claims()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cav, _ := claims[jwtchain.ClaimCaveats].([]string); !slices.Equal(cav, []string{"tenant:acme"}) || claims[jwt.NotBefore] != now.Add(-time.Minute).Unix() {
+			t.Fatalf("Claims() = %v", claims)
+		}
+		if _, ok := claims[jwt.IssuedAt]; ok {
+			t.Fatal("Claims() kept the root's iat")
+		}
+	})
+
+	t.Run("expired chains fail before signature checks", func(t *testing.T) {
+		policy := f.policy()
+		policy.Now = func() time.Time { return now.Add(2 * time.Hour) }
+		// The garbage link would fail its signature check; expiry is
+		// reported first.
+		garbage := forge(t, f.root, f.b, jwa.EdDSA, map[string]any{jwt.Issuer: urn(t, f.b), jwt.ExpirationTime: now.Unix(), jwt.JWTID: "x"}, nil)
+		if _, err := policy.Verify(f.root + jwtchain.Separator + garbage); err == nil || !strings.Contains(err.Error(), "expired") {
+			t.Fatalf("Verify() error = %v, want expired", err)
+		}
+	})
 }

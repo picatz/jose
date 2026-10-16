@@ -186,11 +186,11 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 		claims[ClaimCaveats] = slices.Clone(r.Caveats)
 	}
 	if r.Holder != nil {
-		jkt, err := thumbprint.FromPublicKey(r.Holder)
+		confirmation, err := Confirmation(r.Holder)
 		if err != nil {
 			return nil, fmt.Errorf("jwtchain: Restriction.Holder: %w", err)
 		}
-		claims[jwt.Confirmation] = map[string]any{"jkt": jkt}
+		claims[jwt.Confirmation] = confirmation
 	}
 
 	alg := config.alg
@@ -251,6 +251,9 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 //
 // https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
 func Confirmation(holder any) (map[string]any, error) {
+	if _, err := jwa.ForKey(holder); err != nil {
+		return nil, fmt.Errorf("jwtchain: holder must be a signing key, so it can prove possession: %w", err)
+	}
 	jkt, err := thumbprint.FromPublicKey(holder)
 	if err != nil {
 		return nil, fmt.Errorf("jwtchain: holder: %w", err)

@@ -2,6 +2,7 @@ package jwtchain
 
 import (
 	"bytes"
+	"crypto"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/picatz/jose/internal/strictjson"
+	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
@@ -131,6 +133,9 @@ func parse(input string, maxLinks, maxSize int) (*Chain, error) {
 }
 
 func parseToken(raw string) (*token, error) {
+	if !canonical(raw) {
+		return nil, fmt.Errorf("%w: a token is not in canonical unpadded base64url", ErrFormat)
+	}
 	signature, err := jws.ParseCritical(raw, HeaderParentHash)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrFormat, err)
@@ -163,6 +168,9 @@ func parseToken(raw string) (*token, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %q: %v", ErrFormat, HeaderParentHash, err)
 	}
+	if !slices.Contains([]crypto.Hash{crypto.SHA256, crypto.SHA384, crypto.SHA512}, parent.Hash) {
+		return nil, fmt.Errorf("%w: %q must use sha-256, sha-384 or sha-512", ErrFormat, HeaderParentHash)
+	}
 	t.parent = &parent
 	if embedded, ok := h[HeaderParentToken]; ok {
 		if s, ok := embedded.(string); !ok || s == "" || strings.Contains(s, Separator) {
@@ -171,6 +179,26 @@ func parseToken(raw string) (*token, error) {
 		t.embeds = true
 	}
 	return t, nil
+}
+
+// canonical reports whether every segment of a compact JWS is unpadded
+// base64url that re-encodes to itself, so a token has one spelling. (An
+// ECDSA signature still has two valid values; name tokens by "jti", not
+// by their bytes.)
+func canonical(raw string) bool {
+	for _, segment := range strings.Split(raw, ".") {
+		if segment == "" {
+			continue
+		}
+		decoded, err := base64.Decode(segment)
+		if err != nil {
+			return false
+		}
+		if again, err := base64.Encode(decoded); err != nil || again != segment {
+			return false
+		}
+	}
+	return true
 }
 
 func listsCritical(h header.Parameters, name string) bool {

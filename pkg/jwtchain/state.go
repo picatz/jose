@@ -47,7 +47,6 @@ type state struct {
 	holder       string         // JWK Thumbprint of the current holder, if any
 	confirmation map[string]any // the current "cnf", as given
 	signers      []string       // thumbprint URIs of link signers, root-most first
-	rootActors   []jwt.Party
 }
 
 // rootState reads what a root token allows. Roots come from issuers, so
@@ -72,7 +71,14 @@ func rootState(claims jwt.ClaimsSet) (*state, error) {
 		if !ok {
 			return nil, rootErr("%q must be a string", jwt.Scope)
 		}
-		s.scope, s.hasScope = strings.Fields(text), true
+		// Split on spaces only, as RFC 6749 §3.3 does, and drop anything
+		// that is not a scope token rather than guess what it meant.
+		s.hasScope = true
+		for _, token := range strings.Split(text, " ") {
+			if checkScopeToken(token) == nil {
+				s.scope = append(s.scope, token)
+			}
+		}
 	}
 	if v, ok := claims[jwt.ExpirationTime]; ok {
 		if s.expiry, err = numericDate(v, false); err != nil {
@@ -98,13 +104,10 @@ func rootState(claims jwt.ClaimsSet) (*state, error) {
 		_, hasJKT := cnf["jkt"]
 		_, hasJWK := cnf["jwk"]
 		if hasJKT || hasJWK {
-			if s.holder, err = holderOf(cnf); err != nil {
-				return nil, rootErr("%q: %v", jwt.Confirmation, err)
-			}
+			// A root binding a key this package cannot use still verifies
+			// on its own; it just cannot be derived from.
+			s.holder, _ = holderOf(cnf)
 		}
-	}
-	if s.rootActors, err = claims.Actors(); err != nil {
-		return nil, rootErr("%v", err)
 	}
 	return s, nil
 }
@@ -168,10 +171,11 @@ func (s *state) apply(t *token, algorithms []jwa.Algorithm) error {
 			return linkErr("%q: %v", jwt.IssuedAt, err)
 		}
 	}
-	if v, ok := claims[jwt.JWTID]; ok {
-		if _, ok := v.(string); !ok {
-			return linkErr("%q must be a string", jwt.JWTID)
-		}
+	// Every link has an identifier, so replay caches and revocation lists
+	// can name it: its bytes are not unique, as ECDSA signatures are
+	// malleable.
+	if id, _ := claims[jwt.JWTID].(string); id == "" {
+		return linkErr("%q must be a non-empty string", jwt.JWTID)
 	}
 
 	v, ok := claims[jwt.ExpirationTime]
@@ -295,6 +299,9 @@ func holderOf(cnf map[string]any) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("\"jwk\": %v", err)
 		}
+		if _, err := jwa.ForKey(key); err != nil {
+			return "", fmt.Errorf("\"jwk\" is not a signing key, so its holder could never prove possession")
+		}
 		return thumbprint.FromPublicKey(key)
 	}
 	return "", fmt.Errorf("binds no \"jkt\" or \"jwk\"")
@@ -408,7 +415,6 @@ func (s *state) grant(c *Chain, root jwt.ClaimsSet) *Grant {
 		Holder:       s.holder,
 		Confirmation: maps.Clone(s.confirmation),
 		signers:      slices.Clone(s.signers),
-		rootActors:   s.rootActors,
 	}
 	if s.hasScope {
 		g.Scope = slices.Clone(s.scope)
