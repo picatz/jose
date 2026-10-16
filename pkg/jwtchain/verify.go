@@ -37,7 +37,7 @@ type Policy struct {
 
 	// AllowBearer accepts a chain whose last token has no "cnf": one that
 	// anyone holding it can use. By default such chains are refused, so a
-	// verifier that checks proof of possession against [Verified.Holder]
+	// verifier that checks proof of possession against [Grant.Holder]
 	// is never handed an empty thumbprint.
 	AllowBearer bool
 
@@ -64,9 +64,11 @@ type Policy struct {
 	Now func() time.Time
 }
 
-// Verified is what a chain allows once every link has narrowed it.
-type Verified struct {
-	// Chain is the chain that verified.
+// Grant is what a chain allows once every link has narrowed it. A
+// [Policy] returns one only for a chain that verifies; [Chain.Inspect]
+// returns one without verifying the root.
+type Grant struct {
+	// Chain is the chain the grant comes from.
 	Chain *Chain
 	// Root holds the claims Root returned for the root token.
 	Root jwt.ClaimsSet
@@ -104,8 +106,8 @@ type Verified struct {
 }
 
 // HasScope reports whether the chain grants scope.
-func (v *Verified) HasScope(scope string) bool {
-	return slices.Contains(v.Scope, scope)
+func (g *Grant) HasScope(scope string) bool {
+	return slices.Contains(g.Scope, scope)
 }
 
 // Actors returns the chain's lineage as RFC 8693 actors, the current one
@@ -117,22 +119,22 @@ func (v *Verified) HasScope(scope string) bool {
 // An issuer that re-issues a verified chain as a fresh token keeps the
 // lineage with [jwt.ClaimsSet.SetActors]:
 //
-//	err := claims.SetActors(verified.Actors())
+//	err := claims.SetActors(grant.Actors())
 //
 // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.1
-func (v *Verified) Actors() []jwt.Party {
+func (g *Grant) Actors() []jwt.Party {
 	var actors []jwt.Party
-	if len(v.signers) > 0 && v.Holder != "" {
-		actors = append(actors, jwt.Party{Subject: thumbprintURN(v.Holder)})
+	if len(g.signers) > 0 && g.Holder != "" {
+		actors = append(actors, jwt.Party{Subject: thumbprintURN(g.Holder)})
 	}
-	for _, signer := range slices.Backward(v.signers) {
+	for _, signer := range slices.Backward(g.signers) {
 		actors = append(actors, jwt.Party{Subject: signer})
 	}
-	return append(actors, v.rootActors...)
+	return append(actors, g.rootActors...)
 }
 
 // Verify parses input and verifies it with [Policy.VerifyChain].
-func (p *Policy) Verify(input string) (*Verified, error) {
+func (p *Policy) Verify(input string) (*Grant, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
@@ -147,7 +149,7 @@ func (p *Policy) Verify(input string) (*Verified, error) {
 // each link's signature against its parent's holder key and its claims
 // against what its parent allows, then the audience, the validity window
 // and every caveat.
-func (p *Policy) VerifyChain(c *Chain) (*Verified, error) {
+func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
@@ -207,7 +209,7 @@ func (p *Policy) VerifyChain(c *Chain) (*Verified, error) {
 			return nil, fmt.Errorf("%w: %q: %w", ErrCaveat, caveat, err)
 		}
 	}
-	return s.verified(c, root), nil
+	return s.grant(c, root), nil
 }
 
 func (p *Policy) check() error {

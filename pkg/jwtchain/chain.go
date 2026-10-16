@@ -229,3 +229,22 @@ func (c *Chain) Leaf() string { return c.tokens[len(c.tokens)-1].raw }
 
 // Links returns how many links follow the root.
 func (c *Chain) Links() int { return len(c.tokens) - 1 }
+
+// Inspect reports what the chain would grant, checking each link's
+// signature and narrowing against its parent but not the root, whose
+// signature needs the issuer's key, nor time, audience or caveats. Use it
+// to show or plan a chain, such as before [Derive]; never to authorize.
+// Authorize with [Policy.Verify].
+func (c *Chain) Inspect() (*Grant, error) {
+	root := c.tokens[0].claims
+	s, err := rootState(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, link := range c.tokens[1:] {
+		if err := s.apply(link, DefaultAlgorithms); err != nil {
+			return nil, err
+		}
+	}
+	return s.grant(c, root), nil
+}

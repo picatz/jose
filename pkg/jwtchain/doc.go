@@ -27,7 +27,7 @@
 //     history. Each embedding grows the token by about a third.
 //   - Re-issued: an issuer verifies a chain and mints a fresh, short root,
 //     recording who held the chain in an RFC 8693 "act" claim with
-//     [Verified.Actors] and [jwt.ClaimsSet.SetActors]. The new token is as
+//     [Grant.Actors] and [jwt.ClaimsSet.SetActors]. The new token is as
 //     small as any other, and the history survives as identity claims.
 //
 // # Wire format
@@ -61,7 +61,7 @@
 // [Policy.Root] verifies the root however the application already does,
 // so a chain can grow from any JWT: an OAuth access token, a token minted
 // with package jwt, or one checked against a JWKS. [RootKey] covers the
-// common case of one issuer key. [Verified.Holder] is the key thumbprint a
+// common case of one issuer key. [Grant.Holder] is the key thumbprint a
 // DPoP proof must match (pass it as dpop.Request.Thumbprint), and
 // [Policy.Caveat] is where an application evaluates caveats in whatever
 // language it likes.

@@ -650,3 +650,22 @@ func FuzzParse(f *testing.F) {
 		_, _ = fx.policy().VerifyChain(c)
 	})
 }
+
+func TestInspect(t *testing.T) {
+	f := newFixture(t)
+	c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Scope: []string{"read"}, Holder: f.b.Public()})
+	grant, err := c.Inspect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jkt, _ := thumbprint.FromPublicKey(f.b.Public())
+	if grant.Subject != "alice" || !slices.Equal(grant.Scope, []string{"read"}) || grant.Holder != jkt || !grant.Expiry.Equal(now.Add(time.Minute)) {
+		t.Fatalf("Inspect() = %+v", grant)
+	}
+
+	// Inspect still checks links: one signed by the wrong key fails.
+	forged := parse(t, f.root+jwtchain.Separator+forge(t, f.root, f.b, jwa.EdDSA, map[string]any{jwt.Issuer: urn(t, f.b), jwt.ExpirationTime: now.Add(time.Minute).Unix()}, nil))
+	if _, err := forged.Inspect(); !errors.Is(err, jwtchain.ErrVerification) {
+		t.Fatalf("Inspect(forged) error = %v", err)
+	}
+}

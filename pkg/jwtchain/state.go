@@ -395,9 +395,9 @@ func numericDate(v any, roundUp bool) (time.Time, error) {
 	return time.Unix(int64(seconds), 0), nil
 }
 
-// verified copies s into the exported result.
-func (s *state) verified(c *Chain, root jwt.ClaimsSet) *Verified {
-	v := &Verified{
+// grant copies s into the exported result.
+func (s *state) grant(c *Chain, root jwt.ClaimsSet) *Grant {
+	g := &Grant{
 		Chain:        c,
 		Root:         root,
 		Subject:      s.subject,
@@ -411,13 +411,13 @@ func (s *state) verified(c *Chain, root jwt.ClaimsSet) *Verified {
 		rootActors:   s.rootActors,
 	}
 	if s.hasScope {
-		v.Scope = slices.Clone(s.scope)
-		if v.Scope == nil {
-			v.Scope = []string{}
+		g.Scope = slices.Clone(s.scope)
+		if g.Scope == nil {
+			g.Scope = []string{}
 		}
 	}
 	for _, t := range c.tokens[1:] {
-		v.Links = append(v.Links, maps.Clone(t.claims))
+		g.Links = append(g.Links, maps.Clone(t.claims))
 	}
-	return v
+	return g
 }
