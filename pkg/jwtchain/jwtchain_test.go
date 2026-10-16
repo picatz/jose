@@ -213,7 +213,7 @@ func TestEmbed(t *testing.T) {
 	if again.Links() != 2 || !slices.Equal(again.Tokens(), two.Tokens()) {
 		t.Fatalf("Parse(embedded) tokens differ")
 	}
-	if _, err := f.policy().Verify(single); !errors.Is(err, jwtchain.ErrVerification) {
+	if _, err := f.policy().Verify(single); !errors.Is(err, jwtchain.ErrBearer) {
 		t.Fatalf("Verify(bearer leaf) error = %v, want a refusal without AllowBearer", err)
 	}
 	bearer := f.policy()

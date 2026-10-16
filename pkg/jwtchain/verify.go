@@ -199,7 +199,7 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 		return nil, fmt.Errorf("%w: expired at %s", ErrVerification, s.expiry.UTC().Format(time.RFC3339))
 	}
 	if s.confirmation == nil && !p.AllowBearer {
-		return nil, fmt.Errorf("%w: its last token binds no holder (\"cnf\"), and AllowBearer is not set", ErrVerification)
+		return nil, fmt.Errorf("%w: its last token binds no holder (\"cnf\"), and AllowBearer is not set", ErrBearer)
 	}
 	for _, caveat := range s.caveats {
 		if p.Caveat == nil {

@@ -50,6 +50,9 @@ var (
 	// ErrCaveat means the verifier did not accept a caveat. It also matches
 	// [ErrVerification].
 	ErrCaveat = fmt.Errorf("%w: caveat not satisfied", ErrVerification)
+	// ErrBearer means the chain binds no holder and [Policy.AllowBearer] is
+	// not set. It also matches [ErrVerification].
+	ErrBearer = fmt.Errorf("%w: bearer chain", ErrVerification)
 )
 
 // Chain is a parsed chain: a root token and the links derived from it, in
