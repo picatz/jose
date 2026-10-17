@@ -29,7 +29,7 @@ import (
 // [JSON.General] and [JSON.Flattened] write them.
 //
 // Parsing does not decrypt or authenticate anything; every field is
-// untrusted until [JSON.Decrypt] succeeds. In particular, Unprotected and
+// untrusted until [Decrypter.DecryptJSON] succeeds. In particular, Unprotected and
 // the per-recipient headers are not integrity protected.
 //
 // https://www.rfc-editor.org/rfc/rfc7516#section-7.2
@@ -125,7 +125,7 @@ type jsonWireRecip struct {
 }
 
 // ParseJSON parses a JWE in the general or flattened JSON Serialization.
-// It checks the structure, not the cryptography: call [JSON.Decrypt].
+// It checks the structure, not the cryptography: call [Decrypter.DecryptJSON].
 //
 // It enforces RFC 7516 §7.2.1: duplicate member names are refused at every
 // level, the protected, shared unprotected and per-recipient header names
@@ -228,10 +228,10 @@ func (j *JSON) check() error {
 	if len(j.Recipients) == 0 {
 		return fmt.Errorf("%w: no recipients", ErrMalformed)
 	}
-	if j.Unprotected.Has(Critical) {
+	if j.Unprotected.Has(header.Critical) {
 		return fmt.Errorf(`%w: "crit" must be integrity protected`, ErrMalformed)
 	}
-	if j.Protected.Has(EncryptionAlgorithm) == j.Unprotected.Has(EncryptionAlgorithm) {
+	if j.Protected.Has(header.EncryptionAlgorithm) == j.Unprotected.Has(header.EncryptionAlgorithm) {
 		return fmt.Errorf(`%w: "enc" must be in exactly one of the protected and shared unprotected headers`, ErrMalformed)
 	}
 	for name := range j.Unprotected {
@@ -247,12 +247,12 @@ func (j *JSON) check() error {
 		}
 		combined := j.Header(i)
 		switch {
-		case r.Header.Has(Critical):
+		case r.Header.Has(header.Critical):
 			return fmt.Errorf(`%w: recipient %d: "crit" must be integrity protected`, ErrMalformed, i)
-		case r.Header.Has(EncryptionAlgorithm):
+		case r.Header.Has(header.EncryptionAlgorithm):
 			return fmt.Errorf(`%w: recipient %d: "enc" must be shared by all recipients`, ErrMalformed, i)
-		case combined.Has(CompressionAlgorithm):
-			return fmt.Errorf("%w: compression (%q)", ErrUnsupported, CompressionAlgorithm)
+		case combined.Has(header.Zip):
+			return fmt.Errorf("%w: compression (%q)", ErrUnsupported, header.Zip)
 		}
 		alg, err := combined.Algorithm()
 		if err != nil {
@@ -306,15 +306,15 @@ func supportedKeyManagement(alg jwa.Algorithm) bool {
 	return false
 }
 
-// Decrypt tries the recipients in order with key and returns the plaintext
+// DecryptJSON tries the recipients of j in order with d.Key and returns the plaintext
 // and the index of the recipient that decrypted. A single key is tried
 // against every recipient, so a JWE addressed to several recipients
 // decrypts for each of them with their own key.
 //
-// Recipients whose "alg" is not in opts.Algorithms or is not implemented
-// (RSA1_5, PBES2) are skipped; if none remain, Decrypt returns
+// Recipients whose "alg" is not allowed by d.Algorithms or is not implemented
+// (RSA1_5, PBES2, A*GCMKW) are skipped; if none remain, Decrypt returns
 // [ErrNotAllowed] or [ErrUnsupported]. A disallowed or unsupported "enc",
-// "zip", and a "crit" extension not in opts.SupportedCriticalHeaders are
+// "zip", and a "crit" extension not in d.Critical are
 // refused for the whole message. Every other failure, including a key of
 // the wrong type, a wrong key, and any modification of the protected
 // header, AAD, IV, ciphertext, tag or encrypted key, returns the same
@@ -325,9 +325,13 @@ func supportedKeyManagement(alg jwa.Algorithm) bool {
 // re-serializing never changes what is authenticated.
 //
 // https://www.rfc-editor.org/rfc/rfc7516#section-5.2
-func (j *JSON) Decrypt(key any, opts DecryptOptions) (plaintext []byte, recipient int, err error) {
+func (d Decrypter) DecryptJSON(j *JSON) (plaintext []byte, recipient int, err error) {
+	key := d.Key
 	if key == nil {
-		return nil, -1, fmt.Errorf("%w: Decrypt needs a key", ErrUnsupported)
+		return nil, -1, fmt.Errorf("%w: DecryptJSON needs a key", ErrUnsupported)
+	}
+	if err := d.requireAlgorithms(); err != nil {
+		return nil, -1, err
 	}
 	if err := j.check(); err != nil {
 		return nil, -1, err
@@ -336,14 +340,14 @@ func (j *JSON) Decrypt(key any, opts DecryptOptions) (plaintext []byte, recipien
 	if err != nil {
 		return nil, -1, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
-	if opts.Encryptions != nil && !slices.Contains(opts.Encryptions, enc) {
+	if !d.allowsEncryption(enc) {
 		return nil, -1, fmt.Errorf("%w: %q", ErrNotAllowed, enc)
 	}
 	content, err := contentCipherFor(enc)
 	if err != nil {
 		return nil, -1, err
 	}
-	if err := j.Protected.ValidateCriticalHeaders(opts.SupportedCriticalHeaders); err != nil {
+	if err := j.Protected.ValidateCriticalHeaders(d.Critical); err != nil {
 		return nil, -1, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
 	aad := []byte(j.authenticatedData())
@@ -353,7 +357,7 @@ func (j *JSON) Decrypt(key any, opts DecryptOptions) (plaintext []byte, recipien
 		h := j.Header(i)
 		alg, _ := h.Algorithm()
 		switch {
-		case opts.Algorithms != nil && !slices.Contains(opts.Algorithms, alg):
+		case !d.allowsAlgorithm(alg):
 			notAllowed++
 			continue
 		case !supportedKeyManagement(alg):

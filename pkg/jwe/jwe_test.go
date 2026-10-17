@@ -84,10 +84,16 @@ func TestCookbookDecrypt(t *testing.T) {
 		t.Fatalf("no cookbook vectors: %v", err)
 	}
 	for _, file := range files {
+		if strings.HasPrefix(filepath.Base(file), "5_13") {
+			continue // several recipients: see TestRFC7520MultipleRecipients
+		}
 		vector := loadCookbook(t, file)
+		if vector.Output.Compact == "" {
+			continue // JSON Serialization only: see TestRFC7520JSONSerializations
+		}
 		t.Run(vector.Input.Alg+"/"+vector.Input.Enc, func(t *testing.T) {
 			key := decryptionKey(t, vector.Input.Key)
-			plaintext, message, err := jwe.Decrypt(vector.Output.Compact, key, jwe.DecryptOptions{})
+			plaintext, message, err := decrypterFor(key).Decrypt(vector.Output.Compact)
 			if vector.Input.Alg == "RSA1_5" {
 				if !errors.Is(err, jwe.ErrUnsupported) {
 					t.Fatalf("RSA1_5: err = %v, want ErrUnsupported", err)
@@ -106,14 +112,14 @@ func TestCookbookDecrypt(t *testing.T) {
 
 			// And the reverse: encrypt the same plaintext, decrypt it again.
 			compact, err := jwe.Encrypt(header.Parameters{
-				jwe.Algorithm:           vector.Input.Alg,
-				jwe.EncryptionAlgorithm: vector.Input.Enc,
-				jwe.KeyID:               "cookbook",
+				header.Algorithm:           vector.Input.Alg,
+				header.EncryptionAlgorithm: vector.Input.Enc,
+				header.KeyID:               "cookbook",
 			}, []byte(vector.Input.Plaintext), encryptionKey(t, vector.Input.Key))
 			if err != nil {
 				t.Fatalf("Encrypt: %v", err)
 			}
-			again, _, err := jwe.Decrypt(compact, key, jwe.DecryptOptions{})
+			again, _, err := decrypterFor(key).Decrypt(compact)
 			if err != nil {
 				t.Fatalf("Decrypt(Encrypt): %v", err)
 			}
@@ -169,18 +175,16 @@ func TestRoundTripEveryAlgorithm(t *testing.T) {
 				}
 				for _, plaintext := range [][]byte{nil, []byte("x"), bytes.Repeat([]byte("sixteen bytes!!!"), 3)} {
 					compact, err := jwe.Encrypt(header.Parameters{
-						jwe.Algorithm:           r.alg,
-						jwe.EncryptionAlgorithm: enc,
-						jwe.AgreementPartyUInfo: "QWxpY2U",
-						jwe.AgreementPartyVInfo: "Qm9i",
+						header.Algorithm:           r.alg,
+						header.EncryptionAlgorithm: enc,
+						jwe.AgreementPartyUInfo:    "QWxpY2U",
+						jwe.AgreementPartyVInfo:    "Qm9i",
 					}, plaintext, encKey)
 					if err != nil {
 						t.Fatalf("Encrypt: %v", err)
 					}
-					got, _, err := jwe.Decrypt(compact, decKey, jwe.DecryptOptions{
-						Algorithms:  []jwa.Algorithm{r.alg},
-						Encryptions: []jwa.ContentEncryption{enc},
-					})
+					got, _, err := jwe.Decrypter{Key: decKey, Algorithms: []jwa.Algorithm{r.alg},
+						Encryptions: []jwa.ContentEncryption{enc}}.Decrypt(compact)
 					if err != nil {
 						t.Fatalf("Decrypt: %v", err)
 					}
@@ -195,7 +199,7 @@ func TestRoundTripEveryAlgorithm(t *testing.T) {
 
 func TestTamperingFailsUniformly(t *testing.T) {
 	key, _ := ecdh.P256().GenerateKey(rand.Reader)
-	compact, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.ECDHESA256KW, jwe.EncryptionAlgorithm: jwa.A256CBCHS512}, []byte("attack at dawn"), key.PublicKey())
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.ECDHESA256KW, header.EncryptionAlgorithm: jwa.A256CBCHS512}, []byte("attack at dawn"), key.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +209,7 @@ func TestTamperingFailsUniformly(t *testing.T) {
 		b[len(b)/2] ^= 0x80
 		tampered := append([]string(nil), parts...)
 		tampered[i] = base64url.Encode(b)
-		if _, _, err := jwe.Decrypt(strings.Join(tampered, "."), key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+		if _, _, err := (decrypterFor(key)).Decrypt(strings.Join(tampered, ".")); !errors.Is(err, jwe.ErrDecryption) {
 			t.Errorf("part %d: err = %v, want ErrDecryption", i, err)
 		}
 	}
@@ -213,16 +217,16 @@ func TestTamperingFailsUniformly(t *testing.T) {
 	// The protected header is the AAD: re-encoding it breaks the tag.
 	h, _ := base64url.Decode(parts[0])
 	reencoded := base64url.Encode(append([]byte(" "), h...))
-	if _, _, err := jwe.Decrypt(reencoded+"."+strings.Join(parts[1:], "."), key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	if _, _, err := (decrypterFor(key)).Decrypt(reencoded + "." + strings.Join(parts[1:], ".")); !errors.Is(err, jwe.ErrDecryption) {
 		t.Errorf("re-encoded header: err = %v, want ErrDecryption", err)
 	}
 
 	other, _ := ecdh.P256().GenerateKey(rand.Reader)
-	if _, _, err := jwe.Decrypt(compact, other, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	if _, _, err := (decrypterFor(other)).Decrypt(compact); !errors.Is(err, jwe.ErrDecryption) {
 		t.Errorf("wrong key: err = %v, want ErrDecryption", err)
 	}
 	wrongCurve, _ := ecdh.P384().GenerateKey(rand.Reader)
-	if _, _, err := jwe.Decrypt(compact, wrongCurve, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	if _, _, err := (decrypterFor(wrongCurve)).Decrypt(compact); !errors.Is(err, jwe.ErrDecryption) {
 		t.Errorf("wrong curve: err = %v, want ErrDecryption", err)
 	}
 }
@@ -230,32 +234,32 @@ func TestTamperingFailsUniformly(t *testing.T) {
 func TestRSAOAEPWrongKeyIsUniform(t *testing.T) {
 	a, _ := rsa.GenerateKey(rand.Reader, 2048)
 	b, _ := rsa.GenerateKey(rand.Reader, 2048)
-	compact, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.RSAOAEP256, jwe.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), &a.PublicKey)
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.RSAOAEP256, header.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), &a.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := jwe.Decrypt(compact, b, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	if _, _, err := (decrypterFor(b)).Decrypt(compact); !errors.Is(err, jwe.ErrDecryption) {
 		t.Fatalf("err = %v, want ErrDecryption", err)
 	}
 	small, _ := rsa.GenerateKey(rand.Reader, 1024)
-	if _, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.RSAOAEP256, jwe.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), &small.PublicKey); err == nil {
+	if _, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.RSAOAEP256, header.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), &small.PublicKey); err == nil {
 		t.Fatal("encrypted to a 1024-bit RSA key")
 	}
 }
 
 func TestRejectsUnsafeHeaders(t *testing.T) {
 	key := make([]byte, 32)
-	if _, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.Direct, jwe.EncryptionAlgorithm: jwa.A256GCM, jwe.CompressionAlgorithm: "DEF"}, []byte("x"), key); !errors.Is(err, jwe.ErrUnsupported) {
+	if _, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.Direct, header.EncryptionAlgorithm: jwa.A256GCM, header.Zip: "DEF"}, []byte("x"), key); !errors.Is(err, jwe.ErrUnsupported) {
 		t.Errorf("zip on encrypt: %v", err)
 	}
-	compact, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.Direct, jwe.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), key)
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.Direct, header.EncryptionAlgorithm: jwa.A256GCM}, []byte("x"), key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := jwe.Decrypt(compact, key, jwe.DecryptOptions{Algorithms: []jwa.Algorithm{jwa.A256KW}}); !errors.Is(err, jwe.ErrNotAllowed) {
+	if _, _, err := (jwe.Decrypter{Key: key, Algorithms: []jwa.Algorithm{jwa.A256KW}}).Decrypt(compact); !errors.Is(err, jwe.ErrNotAllowed) {
 		t.Errorf("disallowed alg: %v", err)
 	}
-	if _, _, err := jwe.Decrypt(compact, key, jwe.DecryptOptions{Encryptions: []jwa.ContentEncryption{jwa.A128GCM}}); !errors.Is(err, jwe.ErrNotAllowed) {
+	if _, _, err := (jwe.Decrypter{Key: key, Encryptions: []jwa.ContentEncryption{jwa.A128GCM}}).Decrypt(compact); !errors.Is(err, jwe.ErrNotAllowed) {
 		t.Errorf("disallowed enc: %v", err)
 	}
 
@@ -275,7 +279,7 @@ func TestRejectsUnsafeHeaders(t *testing.T) {
 		if strings.Contains(h, "ECDH-ES") {
 			k = x
 		}
-		if _, _, err := jwe.Decrypt(strings.Join(parts, "."), k, jwe.DecryptOptions{}); err == nil {
+		if _, _, err := (decrypterFor(k)).Decrypt(strings.Join(parts, ".")); err == nil {
 			t.Errorf("%s: decrypted", name)
 		}
 	}
@@ -314,20 +318,20 @@ func (h hardwareDecrypter) Decrypt(r io.Reader, msg []byte, opts crypto.Decrypte
 
 func TestOpaqueRecipients(t *testing.T) {
 	ec, _ := ecdh.P384().GenerateKey(rand.Reader)
-	compact, err := jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.ECDHES, jwe.EncryptionAlgorithm: jwa.A256GCM}, []byte("sealed"), hardwareAgreement{ec})
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.ECDHES, header.EncryptionAlgorithm: jwa.A256GCM}, []byte("sealed"), hardwareAgreement{ec})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, err := jwe.Decrypt(compact, hardwareAgreement{ec}, jwe.DecryptOptions{}); err != nil || string(got) != "sealed" {
+	if got, _, err := (jwe.Decrypter{Key: hardwareAgreement{ec}}).Decrypt(compact); err != nil || string(got) != "sealed" {
 		t.Fatalf("KeyAgreement: %q, %v", got, err)
 	}
 
 	r, _ := rsa.GenerateKey(rand.Reader, 2048)
-	compact, err = jwe.Encrypt(header.Parameters{jwe.Algorithm: jwa.RSAOAEP256, jwe.EncryptionAlgorithm: jwa.A128CBCHS256}, []byte("sealed"), &r.PublicKey)
+	compact, err = jwe.Encrypt(header.Parameters{header.Algorithm: jwa.RSAOAEP256, header.EncryptionAlgorithm: jwa.A128CBCHS256}, []byte("sealed"), &r.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, err := jwe.Decrypt(compact, hardwareDecrypter{r}, jwe.DecryptOptions{}); err != nil || string(got) != "sealed" {
+	if got, _, err := (jwe.Decrypter{Key: hardwareDecrypter{r}}).Decrypt(compact); err != nil || string(got) != "sealed" {
 		t.Fatalf("Decrypter: %q, %v", got, err)
 	}
 }

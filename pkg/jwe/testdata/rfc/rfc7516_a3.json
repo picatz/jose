@@ -1,0 +1,9 @@
+{
+  "source": "RFC 7516 Appendix A.3 (AES Key Wrap and AES_128_CBC_HMAC_SHA_256), values as published; transcribed from the jwcrypto test suite",
+  "plaintext": "Live long and prosper.",
+  "key": {
+    "kty": "oct",
+    "k": "GawgguFyGrWKav7AX4VKUg"
+  },
+  "compact": "eyJhbGciOiJBMTI4S1ciLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0.6KB707dM9YTIgHtLvtgWQ8mKwboJW3of9locizkDTHzBC2IlrT1oOQ.AxY8DCtDaGlsbGljb3RoZQ.KDlTtXchhZTGufMYmOYGS4HffxPSUrfmqCHXaI9wOGY.U0m_YmjN04DJvceFICbCVQ"
+}
