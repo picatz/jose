@@ -75,7 +75,7 @@ const (
 const (
 	// https://www.rfc-editor.org/rfc/rfc9449.html#section-4.2
 	//
-	// "jti", "iat" and "cnf" are [jwt.JWTID], [jwt.IssuedAt] and
+	// "jti", "iat" and "cnf" are [jwt.ID], [jwt.IssuedAt] and
 	// [jwt.Confirmation].
 	ClaimHTTPMethod      = "htm"
 	ClaimHTTPURI         = "htu"

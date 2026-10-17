@@ -35,7 +35,7 @@ func TestNewWithSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := jwt.NewWithSigner(header.Parameters{header.Algorithm: jwa.ES256}, jwt.ClaimsSet{jwt.Subject: "device"}, opaqueSigner{key})
+	token, err := jwt.New(header.Parameters{header.Algorithm: jwa.ES256}, jwt.ClaimsSet{jwt.Subject: "device"}, opaqueSigner{key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestNewWithSigner(t *testing.T) {
 	if parsed.Claims[jwt.Subject] != "device" {
 		t.Fatalf("sub = %v", parsed.Claims[jwt.Subject])
 	}
-	if _, err := jwt.NewWithSigner(header.Parameters{header.Algorithm: jwa.ES256}, jwt.ClaimsSet{jwt.Subject: "x"}, nil); err == nil {
+	if _, err := jwt.New(header.Parameters{header.Algorithm: jwa.ES256}, jwt.ClaimsSet{jwt.Subject: "x"}, nil); err == nil {
 		t.Fatal("accepted a nil signer")
 	}
 }

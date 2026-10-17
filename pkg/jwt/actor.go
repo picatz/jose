@@ -9,11 +9,11 @@ import (
 
 // Claim names registered by OAuth specifications that build on JWT.
 const (
-	Actor        Public = "act"       // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.1
-	MayAct       Public = "may_act"   // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.4
-	Scope        Public = "scope"     // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.2
-	ClientID     Public = "client_id" // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.3
-	Confirmation Public = "cnf"       // https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
+	Actor        = "act"       // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.1
+	MayAct       = "may_act"   // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.4
+	Scope        = "scope"     // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.2
+	ClientID     = "client_id" // https://www.rfc-editor.org/rfc/rfc8693.html#section-4.3
+	Confirmation = "cnf"       // https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
 )
 
 // MaxActors bounds how deep an "act" claim may nest.

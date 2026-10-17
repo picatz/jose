@@ -133,7 +133,7 @@ func (s *Signer) Proof(method, uri string, opts ProofOptions) (string, error) {
 	jtiString := base64url.Encode(jti)
 
 	claims := map[string]any{
-		jwt.JWTID:       jtiString,
+		jwt.ID:          jtiString,
 		ClaimHTTPMethod: method,
 		ClaimHTTPURI:    htu,
 		jwt.IssuedAt:    s.now().Unix(),

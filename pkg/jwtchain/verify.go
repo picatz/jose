@@ -160,14 +160,14 @@ func (g *Grant) Actors() ([]jwt.Party, error) {
 // lengthen it.
 //
 //	claims, err := grant.Claims()
-//	claims[jwt.IssuedAt], claims[jwt.JWTID] = now.Unix(), newID()
+//	claims[jwt.IssuedAt], claims[jwt.ID] = now.Unix(), newID()
 func (g *Grant) Claims() (jwt.ClaimsSet, error) {
 	actors, err := g.Actors()
 	if err != nil {
 		return nil, err
 	}
 	claims := maps.Clone(g.Root)
-	for _, name := range []string{jwt.Audience, jwt.Scope, jwt.ExpirationTime, jwt.NotBefore, jwt.IssuedAt, jwt.JWTID, jwt.Confirmation, jwt.Actor, ClaimCaveats} {
+	for _, name := range []string{jwt.Audience, jwt.Scope, jwt.ExpirationTime, jwt.NotBefore, jwt.IssuedAt, jwt.ID, jwt.Confirmation, jwt.Actor, ClaimCaveats} {
 		delete(claims, name)
 	}
 	switch len(g.Audience) {

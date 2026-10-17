@@ -30,7 +30,7 @@ var DefaultAlgorithms = []jwa.Algorithm{
 
 // linkClaims are the only claims a link may carry.
 var linkClaims = []string{
-	jwt.Issuer, jwt.ExpirationTime, jwt.IssuedAt, jwt.JWTID,
+	jwt.Issuer, jwt.ExpirationTime, jwt.IssuedAt, jwt.ID,
 	jwt.Audience, jwt.NotBefore, jwt.Scope, ClaimCaveats, jwt.Confirmation,
 }
 
@@ -179,8 +179,8 @@ func (s *state) apply(t *token, algorithms []jwa.Algorithm) error {
 	// Every link has an identifier, so replay caches and revocation lists
 	// can name it: its bytes are not unique, as ECDSA signatures are
 	// malleable.
-	if id, _ := claims[jwt.JWTID].(string); id == "" {
-		return linkErr("%q must be a non-empty string", jwt.JWTID)
+	if id, _ := claims[jwt.ID].(string); id == "" {
+		return linkErr("%q must be a non-empty string", jwt.ID)
 	}
 
 	v, ok := claims[jwt.ExpirationTime]
