@@ -57,13 +57,13 @@ func Test_main(t *testing.T) {
 			return
 		}
 
-		token, err = verifier.Verify(r.Context(), bearerToken)
+		verified, err := verifier.Verify(r.Context(), bearerToken)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		sub, ok := token.Claims[jwt.Subject]
+		sub, ok := verified.Claims[jwt.Subject]
 		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -74,7 +74,7 @@ func Test_main(t *testing.T) {
 			return
 		}
 
-		name, ok := token.Claims["name"]
+		name, ok := verified.Claims["name"]
 		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return

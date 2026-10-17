@@ -56,13 +56,13 @@ func main() {
 			return
 		}
 
-		token, err = verifier.Verify(r.Context(), bearerToken)
+		verified, err := verifier.Verify(r.Context(), bearerToken)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		sub, ok := token.Claims[jwt.Subject]
+		sub, ok := verified.Claims[jwt.Subject]
 		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -73,14 +73,13 @@ func main() {
 			return
 		}
 
-		name, ok := token.Claims["name"]
+		name, ok := verified.Claims["name"]
 		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf("Welcome back, %s!", name)))
+		fmt.Fprintf(w, "Welcome back, %v!", name)
 	})
 
 	fmt.Printf("Listening on http://127.0.0.1:8080\n")

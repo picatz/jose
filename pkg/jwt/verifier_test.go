@@ -15,6 +15,7 @@ import (
 
 	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
+	"github.com/picatz/jose/pkg/josetest"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
 	"github.com/picatz/jose/pkg/jws"
@@ -122,7 +123,7 @@ func TestVerifierAccepts(t *testing.T) {
 
 func TestVerifierRefuses(t *testing.T) {
 	f := newVerifierFixture(t)
-	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	other := josetest.Key(t, jwa.ES256)
 	for name, tc := range map[string]struct {
 		token string
 		want  error

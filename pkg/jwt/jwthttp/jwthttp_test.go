@@ -1,13 +1,12 @@
 package jwthttp_test
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/picatz/jose/pkg/header"
+	"github.com/picatz/jose/pkg/josetest"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
 	"github.com/picatz/jose/pkg/jwt/jwthttp"
@@ -38,7 +37,7 @@ func TestBearerToken(t *testing.T) {
 }
 
 func TestSetBearerTokenFromToken(t *testing.T) {
-	_, key, _ := ed25519.GenerateKey(rand.Reader)
+	key := josetest.Key(t, jwa.EdDSA)
 	token, err := jwt.New(header.Parameters{header.Algorithm: jwa.EdDSA, header.Type: jwt.Type}, jwt.ClaimsSet{jwt.Subject: "alice"}, key)
 	if err != nil {
 		t.Fatal(err)

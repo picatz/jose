@@ -1,7 +1,7 @@
 // Package jwe implements JSON Web Encryption (JWE) as defined in RFC 7516,
 // in the compact serialization and the JSON Serialization (general and
 // flattened, with multiple recipients: see [ParseJSON], [EncryptJSON] and
-// [JSON.Decrypt]), with the key management and content encryption
+// [Decrypter.DecryptJSON]), with the key management and content encryption
 // algorithms of RFC 7518 and the X25519 key agreement of RFC 8037.
 //
 // # Algorithms
