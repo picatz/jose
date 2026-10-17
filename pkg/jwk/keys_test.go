@@ -33,9 +33,9 @@ func TestPublicValueUsesFixedWidthCoordinates(t *testing.T) {
 	if key == nil {
 		t.Skip("no short coordinate found")
 	}
-	for name, value := range map[string]func() (jwk.Value, error){
-		"private key": func() (jwk.Value, error) { return jwk.PublicValue(key) },
-		"public key":  func() (jwk.Value, error) { return jwk.PublicValue(&key.PublicKey) },
+	for name, value := range map[string]func() (jwk.Key, error){
+		"private key": func() (jwk.Key, error) { return jwk.PublicValue(key) },
+		"public key":  func() (jwk.Key, error) { return jwk.PublicValue(&key.PublicKey) },
 	} {
 		v, err := value()
 		if err != nil {
@@ -78,7 +78,7 @@ func TestPublicKeyRejectsOffCurvePoint(t *testing.T) {
 }
 
 func TestPublicKeyRejectsMalformedMembers(t *testing.T) {
-	cases := map[string]jwk.Value{
+	cases := map[string]jwk.Key{
 		"missing kty":     {jwk.N: "AQAB"},
 		"numeric n":       {jwk.KeyType: "RSA", jwk.N: 12, jwk.E: "AQAB"},
 		"even exponent":   {jwk.KeyType: "RSA", jwk.N: "0vx7", jwk.E: "Ag"},
@@ -113,7 +113,7 @@ func TestPrivateKeyRoundTrips(t *testing.T) {
 	xValue[jwk.D] = base64url.Encode(xKey.Bytes())
 
 	for name, tc := range map[string]struct {
-		value  jwk.Value
+		value  jwk.Key
 		public crypto.PublicKey
 	}{
 		"EC":      {ecValue, &ecKey.PublicKey},
@@ -172,7 +172,7 @@ func TestPrivateKeyRSA(t *testing.T) {
 
 // RFC 8037 Appendix A.3.
 func TestThumbprintOKP(t *testing.T) {
-	v := jwk.Value{jwk.KeyType: "OKP", jwk.Curve: "Ed25519", jwk.X: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}
+	v := jwk.Key{jwk.KeyType: "OKP", jwk.Curve: "Ed25519", jwk.X: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}
 	got, err := thumbprint.GenerateString(v, crypto.SHA256)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestThumbprintOKP(t *testing.T) {
 }
 
 func TestThumbprintRejectsMalformedMembers(t *testing.T) {
-	for name, v := range map[string]jwk.Value{
+	for name, v := range map[string]jwk.Key{
 		"numeric": {jwk.KeyType: "RSA", jwk.N: 1, jwk.E: "AQAB"},
 		"escape":  {jwk.KeyType: "OKP", jwk.Curve: "Ed25519", jwk.X: `a"b`},
 		"missing": {jwk.KeyType: "EC", jwk.Curve: "P-256", jwk.X: "AA"},
@@ -208,10 +208,22 @@ func TestPublicKeyRejectsOversizedRSA(t *testing.T) {
 	n[0], n[len(n)-1] = 0xc5, 0x01
 	encoded := base64url.Encode(n)
 	maximal := base64url.Encode(n[:jwk.MaxRSAModulusBytes])
-	if _, err := jwk.PublicKey(jwk.Value{jwk.KeyType: "RSA", jwk.N: encoded, jwk.E: "AQAB"}); !errors.Is(err, jwk.ErrInvalidKey) {
+	if _, err := jwk.PublicKey(jwk.Key{jwk.KeyType: "RSA", jwk.N: encoded, jwk.E: "AQAB"}); !errors.Is(err, jwk.ErrInvalidKey) {
 		t.Fatalf("PublicKey() of a %d-bit modulus error = %v, want ErrInvalidKey", len(n)*8, err)
 	}
-	if _, err := jwk.PublicKey(jwk.Value{jwk.KeyType: "RSA", jwk.N: maximal, jwk.E: "AQAB"}); err != nil {
+	if _, err := jwk.PublicKey(jwk.Key{jwk.KeyType: "RSA", jwk.N: maximal, jwk.E: "AQAB"}); err != nil {
 		t.Fatalf("PublicKey() of an 8192-bit modulus error = %v", err)
+	}
+}
+
+// An empty "n" or "e" is a malformed key, not a panic.
+func TestPublicKeyRejectsEmptyRSAMembers(t *testing.T) {
+	for _, v := range []jwk.Key{
+		{jwk.KeyType: "RSA", jwk.N: "", jwk.E: "AQAB"},
+		{jwk.KeyType: "RSA", jwk.N: "AQAB", jwk.E: ""},
+	} {
+		if _, err := jwk.PublicKey(v); !errors.Is(err, jwk.ErrInvalidKey) {
+			t.Errorf("PublicKey(%v) error = %v, want ErrInvalidKey", v, err)
+		}
 	}
 }

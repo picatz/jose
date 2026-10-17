@@ -22,7 +22,7 @@ import (
 type Signer struct {
 	key        crypto.Signer
 	alg        jwa.Algorithm
-	jwk        jwk.Value
+	jwk        jwk.Key
 	thumbprint string
 	now        func() time.Time
 }
@@ -99,7 +99,7 @@ func (s *Signer) Algorithm() jwa.Algorithm { return s.alg }
 func (s *Signer) Thumbprint() string { return s.thumbprint }
 
 // JWK returns a copy of the public JWK embedded in every proof.
-func (s *Signer) JWK() jwk.Value { return cloneMap(s.jwk) }
+func (s *Signer) JWK() jwk.Key { return cloneMap(s.jwk) }
 
 // ProofOptions are the optional parts of a proof.
 type ProofOptions struct {

@@ -5,275 +5,340 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestValueECDSA(t *testing.T) {
-	input := `
-	{
-		"kty":"EC",
-		"crv":"P-256",
-		"x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
-		"y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
-		"kid":"Public key used in JWS spec Appendix A.3 example"
-   	}`
+// RFC 7517 Appendix A.1 public keys and A.3 symmetric keys.
+const rfc7517Set = `
+{"keys":[
+  {"kty":"EC","crv":"P-256",
+   "x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+   "y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+   "use":"enc","kid":"1"},
+  {"kty":"RSA",
+   "n":"0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
+   "e":"AQAB","alg":"RS256","kid":"2011-04-29"},
+  {"kty":"oct","alg":"A128KW","k":"GawgguFyGrWKav7AX4VKUg"},
+  {"kty":"oct",
+   "k":"AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
+   "kid":"HMAC key used in JWS spec Appendix A.1 example"}
+]}`
 
-	value := Value{}
-	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
+func TestParseSetRFC7517(t *testing.T) {
+	set, err := ParseSet([]byte(rfc7517Set))
 	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
+		t.Fatalf("ParseSet() error = %v", err)
 	}
-	if len(value) == 0 {
-		t.Fatal("value is empty")
+	if err := set.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
-
-	if value[KeyType] != "EC" {
-		t.Fatalf("value[KeyType] = %q, want %q", value[KeyType], "EC")
-	}
-	if value[Curve] != "P-256" {
-		t.Fatalf("value[Curve] = %q, want %q", value[Curve], "P-256")
-	}
-	if value[X] != "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU" {
-		t.Fatalf("value[X] = %q, want %q", value[X], "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU")
-	}
-	if value[Y] != "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0" {
-		t.Fatalf("value[Y] = %q, want %q", value[Y], "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0")
-	}
-	if value[KeyID] != "Public key used in JWS spec Appendix A.3 example" {
-		t.Fatalf("value[KeyID] = %q, want %q", value[KeyID], "Public key used in JWS spec Appendix A.3 example")
-	}
-}
-
-func TestValueRSA(t *testing.T) {
-	input := `
-		{
-			"kty":"RSA",
-			"n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
-			"e":"AQAB",
-			"alg":"RS256",
-			"kid":"2011-04-29"
-		}`
-
-	value := Value{}
-	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
-	}
-	if len(value) == 0 {
-		t.Fatal("value is empty")
-	}
-	if value[KeyID] != "2011-04-29" {
-		t.Fatalf("value[KeyID] = %q, want %q", value[KeyID], "2011-04-29")
+	if len(set.Keys) != 4 {
+		t.Fatalf("len(Keys) = %d, want 4", len(set.Keys))
 	}
 
-	public, err := PublicKey(value)
-	if err != nil {
-		t.Fatalf("PublicKey() error = %v", err)
-	}
-	pkey, ok := public.(*rsa.PublicKey)
+	ec, ok := set.Get("1")
 	if !ok {
-		t.Fatalf("public type = %T, want *rsa.PublicKey", public)
+		t.Fatal(`Get("1") not found`)
 	}
-	if pkey.N == nil {
-		t.Fatal("pkey.N = nil, want non-nil")
+	pub, err := PublicKey(ec)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if pkey.E != 65537 {
-		t.Fatalf("pkey.E = %v, want %v", pkey.E, 65537)
+	if k, ok := pub.(*ecdsa.PublicKey); !ok || k.Curve != elliptic.P256() {
+		t.Fatalf("EC key = %T", pub)
+	}
+
+	rk, ok := set.Get("2011-04-29")
+	if !ok {
+		t.Fatal("RSA key not found")
+	}
+	pub, err = PublicKey(rk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := pub.(*rsa.PublicKey); !ok || k.E != 65537 || k.N.BitLen() != 2048 {
+		t.Fatalf("RSA key = %#v", pub)
+	}
+
+	if _, ok := set.Get("missing"); ok {
+		t.Fatal(`Get("missing") found a key`)
 	}
 }
 
-func TestValueEd25519(t *testing.T) {
-	input := `
-	{
-		"kty":"OKP",
-		"crv":"Ed25519",
-		"x":"3pP2u1u8vI1qT5Z0Xq5bZ7MfCqE8pYzX1VXU5Y7w8XU",
-		"use":"sig",
-		"kid":"test"
-	}`
-
-	value := Value{}
-	err := json.NewDecoder(strings.NewReader(input)).Decode(&value)
-	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
+// RFC 7517 Appendix A.2: the EC private key whose public half is A.1's.
+// PrivateKey checks that d matches the point, so a mistyped value fails.
+func TestPrivateKeyRFC7517A2EC(t *testing.T) {
+	key := Key{
+		KeyType: "EC", Curve: "P-256",
+		X:            "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+		Y:            "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+		D:            "870MB6gfuTJ4HtUnUvYMyJpr5eUZNP4Bk43bVdj3eAE",
+		PublicKeyUse: "enc", KeyID: "1",
 	}
-
-	x, err := Ed25519Values(value)
-	if err != nil {
-		t.Fatalf("Ed25519Values() error = %v", err)
+	if err := Validate(key); err != nil {
+		t.Fatal(err)
 	}
-	if len(x) == 0 {
-		t.Fatal("x is empty")
+	if !IsPrivate(key) {
+		t.Fatal("IsPrivate = false")
+	}
+	if _, err := PrivateKey(key); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestSet(t *testing.T) {
-	input := `
-	{
-		"keys":[
-			{
-				"kty":"oct",
-				"alg":"A128KW",
-				"k":"GawgguFyGrWKav7AX4VKUg"
-			},
-			{
-				"kty":"oct",
-				"k":"AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow",
-				"kid":"HMAC key used in JWS spec Appendix A.1 example"
-			},
-			{
-				"kty":"EC",
-				"crv":"P-256",
-				"x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
-				"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
-				"use":"enc",
-				"kid":"1"
-			}
-		]
-	}`
-
-	set := Set{}
-	err := json.NewDecoder(strings.NewReader(input)).Decode(&set)
+// A key with "x5c", "x5t", "x5t#S256" and "x5u" members, as in RFC 7517
+// Appendix B, keeps them as ordinary members. The values here are placeholders,
+// not the RFC's certificate: members this package does not interpret must not
+// break parsing.
+func TestKeyIgnoresX509Members(t *testing.T) {
+	input := `{"kty":"EC","crv":"P-256",
+		"x":"MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+		"y":"4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+		"use":"sig","kid":"1b94c",
+		"x5c":["MIIB"],"x5t":"AAAA","x5t#S256":"AAAA","x5u":"https://example.com/cert"}`
+	var key Key
+	if err := json.Unmarshal([]byte(input), &key); err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(key); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{X509CertificateChain, X509CertificateSHA1Thumbprint, X509CertificateSHA256Thumbprint, X509URL} {
+		if _, ok := key[name]; !ok {
+			t.Errorf("member %q lost", name)
+		}
+	}
+	public, err := PublicValue(mustPublic(t, key))
 	if err != nil {
-		t.Fatalf("Decode() error = %v", err)
+		t.Fatal(err)
 	}
-	if set.Keys == nil {
-		t.Fatal("decoded Set is empty")
+	if _, ok := public[X509CertificateChain]; ok {
+		t.Error("PublicValue kept x5c")
 	}
+}
 
-	if len(set.Keys) == 0 {
-		t.Fatal("len(set.Keys) = 0, want non-zero")
+func mustPublic(t *testing.T, key Key) any {
+	t.Helper()
+	pub, err := PublicKey(key)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, key := range set.Keys {
-		if key[KeyType] == nil || key[KeyType] == "" {
-			t.Fatal("key[KeyType] is empty")
+	return pub
+}
+
+// walkKeys calls fn for every JWK (an object with "kty") in a JSON value.
+func walkKeys(v any, path string, fn func(path string, key Key)) {
+	switch v := v.(type) {
+	case map[string]any:
+		if _, ok := v[KeyType]; ok {
+			fn(path, Key(v))
+			return
 		}
-
-		if key[KeyType] == "oct" {
-			k, err := SymmetricKey(key)
-			if err != nil {
-				t.Fatalf("SymmetricKey() error = %v", err)
-			}
-			if len(k) == 0 {
-				t.Fatal("k is empty")
-			}
-
-			sk, err := HMACSecretKey(key)
-			if err != nil {
-				t.Fatalf("HMACSecretKey() error = %v", err)
-			}
-			if len(sk) == 0 {
-				t.Fatal("sk is empty")
-			}
+		for name, child := range v {
+			walkKeys(child, path+"/"+name, fn)
 		}
-
-		if key[KeyType] == "EC" {
-			crv, x, y, err := ECDSAValues(key)
-			if err != nil {
-				t.Fatalf("ECDSAValues() error = %v", err)
-			}
-			if len(crv) == 0 {
-				t.Fatal("crv is empty")
-			}
-			if len(x) == 0 {
-				t.Fatal("x is empty")
-			}
-			if len(y) == 0 {
-				t.Fatal("y is empty")
-			}
-
-			public, err := PublicKey(key)
-			if err != nil {
-				t.Fatalf("PublicKey() error = %v", err)
-			}
-			pkey, ok := public.(*ecdsa.PublicKey)
-			if !ok {
-				t.Fatalf("public type = %T, want *ecdsa.PublicKey", public)
-			}
-			if pkey.X == nil {
-				t.Fatal("pkey.X = nil, want non-nil")
-			}
-			if pkey.Y == nil {
-				t.Fatal("pkey.Y = nil, want non-nil")
-			}
-			if pkey.Curve != elliptic.P256() {
-				t.Fatalf("pkey.Curve = %v, want P-256", pkey.Curve.Params().Name)
-			}
+	case []any:
+		for i, child := range v {
+			walkKeys(child, path+"/"+string(rune('0'+i)), fn)
 		}
 	}
 }
 
-func TestErrorMessages(t *testing.T) {
-	t.Run("ECDSAValues with non-EC key type", func(t *testing.T) {
-		value := Value{
-			KeyType: "RSA",
+// RFC 7520 §3 keys (the JOSE Cookbook), as they appear in the JWS and JWE
+// cookbook vectors: every key must validate, a private key must return its
+// private form and agree with the published public members.
+func TestCookbookKeys(t *testing.T) {
+	var files []string
+	for _, pattern := range []string{"../jws/testdata/cookbook/*.json", "../jwe/testdata/cookbook/*.json"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
 		}
-		_, _, _, err := ECDSAValues(value)
-		if err == nil || !strings.Contains(err.Error(), "JWK value is not EC") {
-			t.Fatalf("ECDSAValues() error = %v, want error containing %q", err, "JWK value is not EC")
+		files = append(files, matches...)
+	}
+	if len(files) == 0 {
+		t.Skip("cookbook vectors not found")
+	}
+	count := map[string]int{}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
+		var doc any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		walkKeys(doc, "", func(path string, key Key) {
+			if !strings.HasPrefix(path, "/input/key") {
+				return // ephemeral keys in the outputs are not published keys
+			}
+			name := filepath.Base(file) + path
+			if err := Validate(key); err != nil {
+				t.Errorf("%s: Validate() error = %v", name, err)
+				return
+			}
+			kty := key[KeyType].(string)
+			count[kty]++
+			if kty == KeyTypeOct {
+				if _, err := PublicKey(key); !errors.Is(err, ErrInvalidKey) {
+					t.Errorf("%s: PublicKey(oct) error = %v, want ErrInvalidKey", name, err)
+				}
+				return
+			}
+			pub, err := PublicKey(key)
+			if err != nil {
+				t.Errorf("%s: PublicKey() error = %v", name, err)
+				return
+			}
+			published, err := PublicValue(pub)
+			if err != nil {
+				t.Errorf("%s: PublicValue() error = %v", name, err)
+				return
+			}
+			if !IsPrivate(key) {
+				return
+			}
+			private, err := PrivateKey(key)
+			if err != nil {
+				t.Errorf("%s: PrivateKey() error = %v", name, err)
+				return
+			}
+			derived, err := PublicValue(private)
+			if err != nil {
+				t.Errorf("%s: PublicValue(private) error = %v", name, err)
+				return
+			}
+			for member, want := range published {
+				if derived[member] != want {
+					t.Errorf("%s: public member %q = %v, want %v", name, member, derived[member], want)
+				}
+			}
+			for member := range derived {
+				// The RFC's public members agree with what the private
+				// key derives, apart from leading-zero trimming already
+				// normalized by PublicValue.
+				if got, ok := key[member]; ok && got != derived[member] {
+					t.Errorf("%s: member %q = %v, derived %v", name, member, got, derived[member])
+				}
+			}
+		})
+	}
+	for _, kty := range []string{KeyTypeRSA, KeyTypeEC, KeyTypeOct} {
+		if count[kty] == 0 {
+			t.Errorf("no %s keys found in the cookbook vectors", kty)
+		}
+	}
+}
 
-	t.Run("RSAValues with non-RSA key type", func(t *testing.T) {
-		value := Value{
-			KeyType: "EC",
-		}
-		_, _, _, err := RSAValues(value)
-		if err == nil || !strings.Contains(err.Error(), "JWK value is not RSA") {
-			t.Fatalf("RSAValues() error = %v, want error containing %q", err, "JWK value is not RSA")
-		}
-	})
+// RFC 8037 Appendix A.1: the Ed25519 private key; PrivateKey checks d against x.
+func TestPrivateKeyRFC8037A1(t *testing.T) {
+	key := Key{
+		KeyType: "OKP", Curve: "Ed25519",
+		D: "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+		X: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+	}
+	if err := Validate(key); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	t.Run("SymmetricKey with no key value", func(t *testing.T) {
-		value := Value{
-			K: "",
+func TestParseSetErrors(t *testing.T) {
+	for name, input := range map[string]string{
+		"empty":            ``,
+		"not an object":    `[]`,
+		"no keys":          `{}`,
+		"null keys":        `{"keys":null}`,
+		"keys not array":   `{"keys":{}}`,
+		"duplicate member": `{"keys":[],"keys":[]}`,
+		"duplicate nested": `{"keys":[{"kty":"oct","kty":"oct","k":"AAAA"}]}`,
+		"duplicate kid":    `{"keys":[{"kty":"oct","kid":"a","k":"AAAA"},{"kty":"oct","kid":"a","k":"AAAA"}]}`,
+		"trailing data":    `{"keys":[]} {}`,
+	} {
+		if _, err := ParseSet([]byte(input)); !errors.Is(err, ErrFormat) {
+			t.Errorf("%s: ParseSet() error = %v, want ErrFormat", name, err)
 		}
-		_, err := SymmetricKey(value)
-		if err == nil || !strings.Contains(err.Error(), "no symmetric key value set") {
-			t.Fatalf("SymmetricKey() error = %v, want error containing %q", err, "no symmetric key value set")
-		}
-	})
+	}
+	// Unlike Validate, ParseSet takes keys it does not understand.
+	set, err := ParseSet([]byte(`{"keys":[{"kty":"XYZ"}, {"kty":"oct","k":"AAAA"}]}`))
+	if err != nil || len(set.Keys) != 2 {
+		t.Fatalf("ParseSet() = %v, %v", set, err)
+	}
+	if err := set.Validate(); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidKey", err)
+	}
+}
 
-	t.Run("Set.Get with non-existent key", func(t *testing.T) {
-		set := &Set{
-			Keys: []Value{
-				{
-					KeyID: "key1",
-				},
-			},
-		}
-		_, err := set.Get("nonexistent")
-		if err == nil || !strings.Contains(err.Error(), "key \"nonexistent\" not found in set") {
-			t.Fatalf("set.Get() error = %v, want error containing %q", err, "key \"nonexistent\" not found in set")
-		}
-	})
+func TestSetValidate(t *testing.T) {
+	if err := (&Set{}).Validate(); !errors.Is(err, ErrFormat) {
+		t.Errorf("empty set error = %v, want ErrFormat", err)
+	}
+	dup := &Set{Keys: []Key{{KeyType: "oct", K: "AAAA", KeyID: "a"}, {KeyType: "oct", K: "AAAA", KeyID: "a"}}}
+	if err := dup.Validate(); !errors.Is(err, ErrFormat) {
+		t.Errorf("duplicate kid error = %v, want ErrFormat", err)
+	}
+	// A set of keys without kids is allowed.
+	ok := &Set{Keys: []Key{{KeyType: "oct", K: "AAAA"}, {KeyType: "oct", K: "AAAA"}}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("kid-less set error = %v", err)
+	}
+	if _, found := ok.Get(""); found {
+		t.Error(`Get("") matched a key without kid`)
+	}
 }
 
 func TestValidate(t *testing.T) {
-	t.Run("valid EC key with P-256 curve", func(t *testing.T) {
-		value := Value{
-			KeyType: "EC",
-			Curve:   "P-256",
-			X:       "dGVzdA", // base64 encoded "test"
-			Y:       "dGVzdA", // base64 encoded "test"
+	const (
+		x256 = "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4"
+		y256 = "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM"
+	)
+	valid := []Key{
+		{KeyType: "EC", Curve: "P-256", X: x256, Y: y256},
+		{KeyType: "oct", K: "AAAA"},
+		{KeyType: "OKP", Curve: "Ed25519", X: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"},
+	}
+	for _, k := range valid {
+		if err := Validate(k); err != nil {
+			t.Errorf("Validate(%v) error = %v", k, err)
 		}
-		err := Validate(value)
-		if err != nil {
-			t.Fatalf("Validate() error = %v", err)
+	}
+	invalid := map[string]Key{
+		"nil":               nil,
+		"no kty":            {X: x256},
+		"kty not string":    {KeyType: 1},
+		"unknown kty":       {KeyType: "XYZ"},
+		"off curve":         {KeyType: "EC", Curve: "P-256", X: "dGVzdA", Y: "dGVzdA"},
+		"unsupported curve": {KeyType: "EC", Curve: "secp256k1", X: x256, Y: y256},
+		"missing y":         {KeyType: "EC", Curve: "P-256", X: x256},
+		"private mismatch":  {KeyType: "EC", Curve: "P-256", X: x256, Y: y256, D: "AAAA"},
+		"empty oct":         {KeyType: "oct", K: ""},
+		"oct not base64":    {KeyType: "oct", K: "!!"},
+		"oct wrong type":    {KeyType: "oct", K: 5},
+		"rsa no e":          {KeyType: "RSA", N: "AQAB"},
+		"short ed25519":     {KeyType: "OKP", Curve: "Ed25519", X: "AA"},
+	}
+	for name, k := range invalid {
+		if err := Validate(k); !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("%s: Validate() error = %v, want ErrInvalidKey", name, err)
 		}
-	})
+	}
+	if err := Validate(Key{KeyType: "EC"}); err == nil || !strings.HasPrefix(err.Error(), "jwk:") {
+		t.Errorf("error = %v, want jwk: prefix", err)
+	}
+}
 
-	t.Run("invalid EC key with unsupported curve", func(t *testing.T) {
-		value := Value{
-			KeyType: "EC",
-			Curve:   "secp256k1", // unsupported curve
-			X:       "dGVzdA",
-			Y:       "dGVzdA",
+func TestMemberNames(t *testing.T) {
+	for got, want := range map[string]string{
+		KeyType: "kty", PublicKeyUse: "use", KeyOperations: "key_ops", Algorithm: "alg",
+		KeyID: "kid", X509URL: "x5u", X509CertificateChain: "x5c",
+		X509CertificateSHA1Thumbprint: "x5t", X509CertificateSHA256Thumbprint: "x5t#S256",
+	} {
+		if got != want {
+			t.Errorf("constant = %q, want %q", got, want)
 		}
-		err := Validate(value)
-		if err == nil || !strings.Contains(err.Error(), "invalid curve") {
-			t.Fatalf("Validate() error = %v, want error containing %q", err, "invalid curve")
-		}
-	})
+	}
 }

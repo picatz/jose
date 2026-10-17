@@ -157,7 +157,7 @@ func craft(t *testing.T, key crypto.Signer, h jws.Header, claims map[string]any)
 func TestVerifyRejects(t *testing.T) {
 	key := newP256(t)
 	public, _ := jwk.PublicValue(key)
-	private := jwk.Value{}
+	private := jwk.Key{}
 	for k, v := range public {
 		private[k] = v
 	}

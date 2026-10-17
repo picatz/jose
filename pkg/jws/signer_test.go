@@ -201,9 +201,9 @@ func TestSignRejectsWrongKeyType(t *testing.T) {
 
 type cookbookSignature struct {
 	Input struct {
-		Payload string    `json:"payload"`
-		Key     jwk.Value `json:"key"`
-		Alg     string    `json:"alg"`
+		Payload string  `json:"payload"`
+		Key     jwk.Key `json:"key"`
+		Alg     string  `json:"alg"`
 	} `json:"input"`
 	Output struct {
 		Compact string `json:"compact"`
@@ -228,7 +228,7 @@ func TestCookbookSignatures(t *testing.T) {
 			}
 			var verifyKey any
 			if vector.Input.Key[jwk.KeyType] == jwk.KeyTypeOct {
-				verifyKey, err = jwk.HMACSecretKey(vector.Input.Key)
+				verifyKey, err = base64url.Decode(vector.Input.Key[jwk.K].(string))
 			} else {
 				verifyKey, err = jwk.PublicKey(vector.Input.Key)
 			}

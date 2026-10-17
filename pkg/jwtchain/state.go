@@ -140,10 +140,10 @@ func (s *state) apply(t *token, algorithms []jwa.Algorithm) error {
 	if !ok {
 		return linkErr("missing %q header", header.JSONWebKey)
 	}
-	if jwk.IsPrivate(jwk.Value(rawKey)) {
+	if jwk.IsPrivate(jwk.Key(rawKey)) {
 		return linkErr("%q header holds private key material", header.JSONWebKey)
 	}
-	key, err := jwk.PublicKey(jwk.Value(rawKey))
+	key, err := jwk.PublicKey(jwk.Key(rawKey))
 	if err != nil {
 		return linkErr("%q header: %v", header.JSONWebKey, err)
 	}
@@ -297,10 +297,10 @@ func holderOf(cnf map[string]any) (string, error) {
 		return s, nil
 	case hasJWK:
 		object, ok := value.(map[string]any)
-		if !ok || jwk.IsPrivate(jwk.Value(object)) {
+		if !ok || jwk.IsPrivate(jwk.Key(object)) {
 			return "", fmt.Errorf("\"jwk\" must be a public JWK")
 		}
-		key, err := jwk.PublicKey(jwk.Value(object))
+		key, err := jwk.PublicKey(jwk.Key(object))
 		if err != nil {
 			return "", fmt.Errorf("\"jwk\": %v", err)
 		}

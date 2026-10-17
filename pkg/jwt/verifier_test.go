@@ -315,7 +315,7 @@ func TestKeysFromSet(t *testing.T) {
 	signing := clone(value, map[string]any{"kid": "sig", "alg": "EdDSA", "use": "sig"})
 	encryption := clone(value, map[string]any{"kid": "enc", "use": "enc"})
 	wrapping := clone(value, map[string]any{"kid": "wrap", "key_ops": []any{"wrapKey"}})
-	keys, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Value{signing, encryption, wrapping}})
+	keys, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Key{signing, encryption, wrapping}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,9 +329,9 @@ func TestKeysFromSet(t *testing.T) {
 	privateValue, _ := jwk.PublicValue(public)
 	privateValue["d"] = base64url.Encode(private.Seed())
 	for name, set := range map[string]*jwk.Set{
-		"private":   {Keys: []jwk.Value{privateValue}},
-		"symmetric": {Keys: []jwk.Value{{"kty": "oct", "k": "AAAA"}}},
-		"broken":    {Keys: []jwk.Value{{"kty": "EC", "crv": "P-256"}}},
+		"private":   {Keys: []jwk.Key{privateValue}},
+		"symmetric": {Keys: []jwk.Key{{"kty": "oct", "k": "AAAA"}}},
+		"broken":    {Keys: []jwk.Key{{"kty": "EC", "crv": "P-256"}}},
 	} {
 		if _, err := jwt.KeysFromSet(set); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -339,8 +339,8 @@ func TestKeysFromSet(t *testing.T) {
 	}
 }
 
-func clone(v jwk.Value, extra map[string]any) jwk.Value {
-	out := jwk.Value{}
+func clone(v jwk.Key, extra map[string]any) jwk.Key {
+	out := jwk.Key{}
 	for k, value := range v {
 		out[k] = value
 	}
