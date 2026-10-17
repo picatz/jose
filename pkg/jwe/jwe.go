@@ -19,9 +19,20 @@
 // "A128CBC-HS256", "A192CBC-HS384", "A256CBC-HS512" (§5.2).
 //
 // RSA1_5, PBES2 and compression ("zip") are deliberately not implemented:
-// RSA1_5 invites padding-oracle attacks (RFC 8725 §3.2), and compressing
-// before encryption can leak plaintext (RFC 8725 §3.6). Objects that use
-// them are rejected.
+// RSA1_5 invites padding-oracle attacks (RFC 8725 §3.2), PBES2 turns a
+// guessable password into a key, and compressing before encryption can leak
+// plaintext (RFC 8725 §3.6). The AES GCM key wrapping algorithms "A128GCMKW",
+// "A192GCMKW" and "A256GCMKW" (RFC 7518 §4.7, optional to implement) are not
+// implemented either. Objects that use any of them are rejected with
+// [ErrUnsupported].
+//
+// # Decrypting
+//
+// A [Decrypter] bundles the recipient's key with the policy (allowed
+// algorithms and understood "crit" extensions) for [Decrypter.Decrypt]
+// (compact) and [Decrypter.DecryptJSON] (JSON Serialization). Every
+// decryption failure after the structure is accepted returns the same
+// [ErrDecryption], so the error is no oracle for the key or the content.
 //
 // # Keys
 //
@@ -37,7 +48,12 @@
 // A successful decryption proves the content was encrypted to the
 // recipient's key and not modified. It does not identify the sender:
 // anyone holding the recipient's public key can produce a valid JWE. Sign
-// first (a nested JWT, RFC 7519 §11.2) when the sender matters.
+// first when the sender matters.
+//
+// Nested JWTs (a JWE whose "cty" is "JWT" and whose plaintext is a signed
+// JWT, RFC 7519 §5.2) are out of scope: this package returns the plaintext
+// and leaves any further parsing, such as passing it to a jwt.Verifier, to
+// the caller.
 package jwe
 
 import (
@@ -62,37 +78,9 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
-// Registered header parameter names used in JWE.
-//
-// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1
+// JWE-specific header parameter names. The registered names shared with
+// JWS ("alg", "enc", "kid", "zip", "crit" and so on) are in package header.
 const (
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.1
-	Algorithm string = "alg"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.2
-	EncryptionAlgorithm string = "enc"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.3
-	CompressionAlgorithm string = "zip"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.4
-	JWKSetURL string = "jku"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.5
-	JSONWebKey string = "jwk"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.6
-	KeyID string = "kid"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.7
-	X509URL string = "x5u"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.8
-	X509CertificateChain string = "x5c"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.9
-	X509CertificateSHA1Thumbprint string = "x5t"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.10
-	X509CertificateSHA256Thumbprint string = "x5t#S256"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.11
-	Type string = "typ"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.12
-	ContentType string = "cty"
-	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.13
-	Critical string = "crit"
-
 	// EphemeralPublicKey ("epk") carries the sender's ephemeral ECDH key.
 	// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.6.1.1
 	EphemeralPublicKey string = "epk"
@@ -131,8 +119,10 @@ type KeyAgreement interface {
 }
 
 // Message is a parsed compact JWE. Parsing does not decrypt or
-// authenticate anything; every field is untrusted until [Message.Decrypt]
-// succeeds.
+// authenticate anything; every field is untrusted until
+// [Decrypter.DecryptMessage] succeeds. Changing Header after [Parse] does
+// not change what is authenticated: decryption uses the received protected
+// header bytes, not the modified map.
 //
 // https://www.rfc-editor.org/rfc/rfc7516.html#section-3.1
 type Message struct {
@@ -180,7 +170,9 @@ func encodeSegment(b []byte) string {
 	return s
 }
 
-// Parse decodes a compact JWE without decrypting it.
+// Parse decodes a compact JWE without decrypting it. Like [ParseJSON], it
+// refuses a protected header with duplicate member names and any segment
+// that is not canonical unpadded base64url.
 //
 // https://www.rfc-editor.org/rfc/rfc7516.html#section-5.2 (steps 1-3)
 func Parse(compact string) (*Message, error) {
@@ -195,9 +187,9 @@ func Parse(compact string) (*Message, error) {
 	if !utf8.Valid(protected) {
 		return nil, fmt.Errorf("%w: protected header is not UTF-8", ErrMalformed)
 	}
-	var h header.Parameters
-	if err := json.Unmarshal(protected, &h); err != nil || h == nil {
-		return nil, fmt.Errorf("%w: protected header is not a JSON object", ErrMalformed)
+	h, err := parseProtectedHeader(protected)
+	if err != nil {
+		return nil, err
 	}
 	m := &Message{Header: h, protected: parts[0]}
 	if m.EncryptedKey, err = decodeSegment(parts[1], "encrypted key", false); err != nil {
@@ -221,41 +213,84 @@ func Parse(compact string) (*Message, error) {
 	return m, nil
 }
 
-// DecryptOptions restricts what [Message.Decrypt] accepts. The zero value
-// allows every algorithm this package implements and no critical
-// extensions.
-type DecryptOptions struct {
-	// Algorithms lists the allowed "alg" values; nil allows all.
+// Decrypter holds the key and the policy for decrypting JWEs, in the way
+// [jwt.Verifier] holds a verification key and policy. The zero value has no
+// key and decrypts nothing.
+//
+// A symmetric Key (a []byte) needs an explicit Algorithms list: with nil
+// Algorithms, decryption is refused with [ErrNotAllowed]. This mirrors
+// [jwt.Verifier] and keeps one key from serving both "dir" and A*KW.
+//
+// Algorithms and Encryptions are allowlists. A nil list allows the default
+// set: every key management algorithm and every content encryption
+// algorithm listed in the package documentation, so RSA1_5, PBES2, A*GCMKW
+// and compression stay refused as [ErrUnsupported]. An empty, non-nil list
+// allows nothing. Naming the algorithms a key is meant for is still the
+// better practice: a message cannot then choose the algorithm.
+//
+// A Decrypter is safe for concurrent use as long as its fields are not
+// modified.
+//
+// [jwt.Verifier]: https://pkg.go.dev/github.com/picatz/jose/pkg/jwt#Verifier
+type Decrypter struct {
+	// Key is the recipient's private or shared key. See the package
+	// documentation for the key types each algorithm takes.
+	Key any
+
+	// Algorithms lists the allowed "alg" values; nil allows every
+	// implemented one, except that a []byte Key requires an explicit list.
 	Algorithms []jwa.Algorithm
-	// Encryptions lists the allowed "enc" values; nil allows all.
+
+	// Encryptions lists the allowed "enc" values; nil allows every
+	// implemented one.
 	Encryptions []jwa.ContentEncryption
-	// SupportedCriticalHeaders lists the "crit" extensions the caller
-	// understands and processes itself.
-	SupportedCriticalHeaders []string
+
+	// Critical lists the "crit" extensions the caller understands and
+	// processes itself. Any other "crit" extension is refused.
+	Critical []string
 }
 
-// Decrypt parses and decrypts a compact JWE. It is shorthand for [Parse]
-// followed by [Message.Decrypt].
-func Decrypt(compact string, key any, opts DecryptOptions) ([]byte, *Message, error) {
+// requireAlgorithms refuses a symmetric key without an explicit allowlist.
+func (d Decrypter) requireAlgorithms() error {
+	if _, ok := d.Key.([]byte); ok && d.Algorithms == nil {
+		return fmt.Errorf("%w: a []byte key needs an explicit Algorithms list", ErrNotAllowed)
+	}
+	return nil
+}
+
+func (d Decrypter) allowsAlgorithm(alg jwa.Algorithm) bool {
+	// With nil Algorithms, an algorithm this package does not implement
+	// is refused later as ErrUnsupported.
+	return d.Algorithms == nil || slices.Contains(d.Algorithms, alg)
+}
+
+func (d Decrypter) allowsEncryption(enc jwa.ContentEncryption) bool {
+	return d.Encryptions == nil || slices.Contains(d.Encryptions, enc)
+}
+
+// Decrypt parses and decrypts a compact JWE: [Parse] followed by
+// [Decrypter.DecryptMessage]. The returned Message is non-nil only on
+// success.
+func (d Decrypter) Decrypt(compact string) ([]byte, *Message, error) {
 	m, err := Parse(compact)
 	if err != nil {
 		return nil, nil, err
 	}
-	plaintext, err := m.Decrypt(key, opts)
+	plaintext, err := d.DecryptMessage(m)
 	if err != nil {
 		return nil, nil, err
 	}
 	return plaintext, m, nil
 }
 
-// Decrypt authenticates and decrypts the message with key and returns the
-// plaintext. See the package documentation for the key types each
-// algorithm takes. Every authentication or key failure returns
-// [ErrDecryption]; unsupported or disallowed algorithms return
+// DecryptMessage authenticates and decrypts a parsed compact JWE with d.Key
+// and returns the plaintext. Use it after [Parse] when the header (for
+// example "kid") picks the Decrypter. Every authentication or key failure
+// returns [ErrDecryption]; unsupported or disallowed algorithms return
 // [ErrUnsupported] or [ErrNotAllowed].
 //
 // https://www.rfc-editor.org/rfc/rfc7516.html#section-5.2
-func (m *Message) Decrypt(key any, opts DecryptOptions) ([]byte, error) {
+func (d Decrypter) DecryptMessage(m *Message) ([]byte, error) {
 	alg, err := m.Algorithm()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
@@ -264,24 +299,27 @@ func (m *Message) Decrypt(key any, opts DecryptOptions) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
-	if opts.Algorithms != nil && !slices.Contains(opts.Algorithms, alg) {
+	if err := d.requireAlgorithms(); err != nil {
+		return nil, err
+	}
+	if !d.allowsAlgorithm(alg) {
 		return nil, fmt.Errorf("%w: %q", ErrNotAllowed, alg)
 	}
-	if opts.Encryptions != nil && !slices.Contains(opts.Encryptions, enc) {
+	if !d.allowsEncryption(enc) {
 		return nil, fmt.Errorf("%w: %q", ErrNotAllowed, enc)
 	}
 	// RFC 7516 §4.1.3: an unsupported "zip" must cause rejection.
-	if m.Header.Has(CompressionAlgorithm) {
-		return nil, fmt.Errorf("%w: compression (%q)", ErrUnsupported, CompressionAlgorithm)
+	if m.Header.Has(header.Zip) {
+		return nil, fmt.Errorf("%w: compression (%q)", ErrUnsupported, header.Zip)
 	}
-	if err := m.Header.ValidateCriticalHeaders(opts.SupportedCriticalHeaders); err != nil {
+	if err := m.Header.ValidateCriticalHeaders(d.Critical); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
 	content, err := contentCipherFor(enc)
 	if err != nil {
 		return nil, err
 	}
-	cek, err := m.contentKey(alg, enc, content.keySize, key)
+	cek, err := m.contentKey(alg, enc, content.keySize, d.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -373,6 +411,11 @@ func agree(h header.Parameters, recipient KeyAgreement) (z, apu, apv []byte, err
 	epk := jwk.Key(raw)
 	if jwk.IsPrivate(epk) {
 		return nil, nil, nil, fmt.Errorf("%w: %q contains private key material", ErrMalformed, EphemeralPublicKey)
+	}
+	// jwk.PublicKey accepts more key types than ECDH-ES; narrow the type
+	// before it parses attacker-controlled members.
+	if kty, _ := raw["kty"].(string); kty != "EC" && kty != "OKP" {
+		return nil, nil, nil, fmt.Errorf("%w: %q must be an EC or OKP key", ErrMalformed, EphemeralPublicKey)
 	}
 	public, err := jwk.PublicKey(epk)
 	if err != nil {
@@ -494,8 +537,8 @@ func Encrypt(h header.Parameters, plaintext []byte, key any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
-	if protectedHeader.Has(CompressionAlgorithm) {
-		return "", fmt.Errorf("%w: compression (%q)", ErrUnsupported, CompressionAlgorithm)
+	if protectedHeader.Has(header.Zip) {
+		return "", fmt.Errorf("%w: compression (%q)", ErrUnsupported, header.Zip)
 	}
 	if protectedHeader.Has(EphemeralPublicKey) {
 		return "", fmt.Errorf("%w: %q is generated by Encrypt", ErrMalformed, EphemeralPublicKey)

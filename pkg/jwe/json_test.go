@@ -27,6 +27,9 @@ func TestCookbookJSONDecrypt(t *testing.T) {
 		t.Fatalf("no cookbook vectors: %v", err)
 	}
 	for _, file := range files {
+		if strings.HasPrefix(filepath.Base(file), "5_13") {
+			continue // several recipients: see TestRFC7520MultipleRecipients
+		}
 		raw := loadCookbookRaw(t, file)
 		var vector struct {
 			Input struct {
@@ -50,7 +53,7 @@ func TestCookbookJSONDecrypt(t *testing.T) {
 					t.Fatalf("ParseJSON: %v", err)
 				}
 				key := decryptionKey(t, vector.Input.Key)
-				plaintext, index, err := parsed.Decrypt(key, jwe.DecryptOptions{})
+				plaintext, index, err := decrypterFor(key).DecryptJSON(parsed)
 				if vector.Input.Alg == "RSA1_5" {
 					if !errors.Is(err, jwe.ErrUnsupported) {
 						t.Fatalf("RSA1_5: err = %v, want ErrUnsupported", err)
@@ -74,7 +77,7 @@ func TestCookbookJSONDecrypt(t *testing.T) {
 					if err != nil {
 						t.Fatalf("%s: reparse: %v", name, err)
 					}
-					if got, _, err := again.Decrypt(key, jwe.DecryptOptions{}); err != nil || string(got) != vector.Input.Plaintext {
+					if got, _, err := (decrypterFor(key)).DecryptJSON(again); err != nil || string(got) != vector.Input.Plaintext {
 						t.Fatalf("%s: re-serialized does not decrypt: %v", name, err)
 					}
 				}
@@ -116,12 +119,12 @@ func newMultiKeys(t *testing.T) multiKeys {
 func (k multiKeys) encrypt(t *testing.T, aad []byte) *jwe.JSON {
 	t.Helper()
 	j, err := jwe.EncryptJSON(
-		header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM, jwe.Type: "example"},
+		header.Parameters{header.EncryptionAlgorithm: jwa.A128GCM, header.Type: "example"},
 		header.Parameters{"shared": "hint"},
 		[]byte("for all of you"), aad,
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A128KW, jwe.KeyID: "kw"}, Key: k.kw},
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.ECDHESA128KW, jwe.KeyID: "ec", jwe.AgreementPartyVInfo: "Qm9i"}, Key: k.ec.PublicKey()},
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.RSAOAEP256, jwe.KeyID: "rsa"}, Key: &k.rsaKey.PublicKey},
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A128KW, header.KeyID: "kw"}, Key: k.kw},
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.ECDHESA128KW, header.KeyID: "ec", jwe.AgreementPartyVInfo: "Qm9i"}, Key: k.ec.PublicKey()},
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.RSAOAEP256, header.KeyID: "rsa"}, Key: &k.rsaKey.PublicKey},
 	)
 	if err != nil {
 		t.Fatalf("EncryptJSON: %v", err)
@@ -148,24 +151,24 @@ func TestJSONMultipleRecipientsRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, index, err := parsed.Decrypt(key, jwe.DecryptOptions{})
+			got, index, err := decrypterFor(key).DecryptJSON(parsed)
 			if err != nil || index != want || string(got) != "for all of you" || !bytes.Equal(parsed.AAD, aad) {
 				t.Fatalf("recipient %d: %q index %d err %v", want, got, index, err)
 			}
 		}
 		stranger := make([]byte, 16)
 		parsed, _ := jwe.ParseJSON(wire)
-		if _, _, err := parsed.Decrypt(stranger, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+		if _, _, err := (decrypterFor(stranger)).DecryptJSON(parsed); !errors.Is(err, jwe.ErrDecryption) {
 			t.Fatalf("stranger: %v", err)
 		}
 		// Algorithm allow lists skip recipients.
-		if _, index, err := parsed.Decrypt(k.rsaKey, jwe.DecryptOptions{Algorithms: []jwa.Algorithm{jwa.RSAOAEP256}}); err != nil || index != 2 {
+		if _, index, err := (jwe.Decrypter{Key: k.rsaKey, Algorithms: []jwa.Algorithm{jwa.RSAOAEP256}}).DecryptJSON(parsed); err != nil || index != 2 {
 			t.Fatalf("allow list: %d %v", index, err)
 		}
-		if _, _, err := parsed.Decrypt(k.kw, jwe.DecryptOptions{Algorithms: []jwa.Algorithm{jwa.A256KW}}); !errors.Is(err, jwe.ErrNotAllowed) {
+		if _, _, err := (jwe.Decrypter{Key: k.kw, Algorithms: []jwa.Algorithm{jwa.A256KW}}).DecryptJSON(parsed); !errors.Is(err, jwe.ErrNotAllowed) {
 			t.Fatalf("nothing allowed: %v", err)
 		}
-		if _, _, err := parsed.Decrypt(k.kw, jwe.DecryptOptions{Encryptions: []jwa.ContentEncryption{jwa.A256GCM}}); !errors.Is(err, jwe.ErrNotAllowed) {
+		if _, _, err := (jwe.Decrypter{Key: k.kw, Encryptions: []jwa.ContentEncryption{jwa.A256GCM}}).DecryptJSON(parsed); !errors.Is(err, jwe.ErrNotAllowed) {
 			t.Fatalf("enc not allowed: %v", err)
 		}
 	}
@@ -175,8 +178,8 @@ func TestJSONFlattenedAndDirect(t *testing.T) {
 	key := make([]byte, 32)
 	rand.Read(key)
 	for name, recipient := range map[string]jwe.RecipientKey{
-		"dir":     {Header: header.Parameters{jwe.Algorithm: jwa.Direct}, Key: key},
-		"ECDH-ES": {Header: header.Parameters{jwe.Algorithm: jwa.ECDHES}},
+		"dir":     {Header: header.Parameters{header.Algorithm: jwa.Direct}, Key: key},
+		"ECDH-ES": {Header: header.Parameters{header.Algorithm: jwa.ECDHES}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var decrypt any = key
@@ -184,7 +187,7 @@ func TestJSONFlattenedAndDirect(t *testing.T) {
 				ec, _ := ecdh.X25519().GenerateKey(rand.Reader)
 				recipient.Key, decrypt = ec.PublicKey(), ec
 			}
-			j, err := jwe.EncryptJSON(header.Parameters{jwe.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("one"), []byte("aad"), recipient)
+			j, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("one"), []byte("aad"), recipient)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -199,15 +202,15 @@ func TestJSONFlattenedAndDirect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, _, err := parsed.Decrypt(decrypt, jwe.DecryptOptions{}); err != nil || string(got) != "one" {
+			if got, _, err := (decrypterFor(decrypt)).DecryptJSON(parsed); err != nil || string(got) != "one" {
 				t.Fatalf("%q %v", got, err)
 			}
 		})
 	}
 	// Two recipients with a content-key-fixing algorithm are refused.
-	_, err := jwe.EncryptJSON(header.Parameters{jwe.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("x"), nil,
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.Direct}, Key: key},
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A256KW}, Key: key})
+	_, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("x"), nil,
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.Direct}, Key: key},
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A256KW}, Key: key})
 	if err == nil {
 		t.Fatal("dir with two recipients encrypted")
 	}
@@ -313,7 +316,7 @@ func TestJSONParseRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unknown member refused: %v", err)
 	}
-	if _, _, err := parsed.Decrypt(k.kw, jwe.DecryptOptions{}); err != nil {
+	if _, _, err := (decrypterFor(k.kw)).DecryptJSON(parsed); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -322,20 +325,20 @@ func TestJSONCritHandling(t *testing.T) {
 	key := make([]byte, 16)
 	rand.Read(key)
 	j, err := jwe.EncryptJSON(
-		header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM, jwe.Critical: []any{"exp-ext"}, "exp-ext": 1},
+		header.Parameters{header.EncryptionAlgorithm: jwa.A128GCM, header.Critical: []any{"exp-ext"}, "exp-ext": 1},
 		nil, []byte("x"), nil,
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A128KW}, Key: key})
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A128KW}, Key: key})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := j.Decrypt(key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrUnsupported) {
+	if _, _, err := (decrypterFor(key)).DecryptJSON(j); !errors.Is(err, jwe.ErrUnsupported) {
 		t.Fatalf("unknown crit: %v", err)
 	}
-	if got, _, err := j.Decrypt(key, jwe.DecryptOptions{SupportedCriticalHeaders: []string{"exp-ext"}}); err != nil || string(got) != "x" {
+	if got, _, err := (jwe.Decrypter{Key: key, Algorithms: symmetricAlgs, Critical: []string{"exp-ext"}}).DecryptJSON(j); err != nil || string(got) != "x" {
 		t.Fatalf("understood crit: %q %v", got, err)
 	}
-	if _, err := jwe.EncryptJSON(header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM}, header.Parameters{jwe.Critical: []any{"a"}, "a": 1}, nil, nil,
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A128KW}, Key: key}); err == nil {
+	if _, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A128GCM}, header.Parameters{header.Critical: []any{"a"}, "a": 1}, nil, nil,
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A128KW}, Key: key}); err == nil {
 		t.Fatal("encrypted with unprotected crit")
 	}
 }
@@ -380,7 +383,7 @@ func TestJSONTamperingFailsUniformly(t *testing.T) {
 				keys = keys[:1] // only that recipient's key is affected
 			}
 			for _, key := range keys {
-				if _, _, err := parsed.Decrypt(key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+				if _, _, err := (decrypterFor(key)).DecryptJSON(parsed); !errors.Is(err, jwe.ErrDecryption) {
 					t.Errorf("err = %v, want ErrDecryption", err)
 				}
 			}
@@ -400,7 +403,7 @@ func TestJSONEncMismatchAndWrongKeyType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := parsed.Decrypt(k.kw, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	if _, _, err := (decrypterFor(k.kw)).DecryptJSON(parsed); !errors.Is(err, jwe.ErrDecryption) {
 		t.Fatalf("swapped alg: %v", err)
 	}
 	// Unsupported algorithms are skipped, and reported when nothing else is left.
@@ -412,13 +415,13 @@ func TestJSONEncMismatchAndWrongKeyType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := parsed.Decrypt(k.rsaKey, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrUnsupported) {
+	if _, _, err := (decrypterFor(k.rsaKey)).DecryptJSON(parsed); !errors.Is(err, jwe.ErrUnsupported) {
 		t.Fatalf("RSA1_5: %v", err)
 	}
 	// Mutating a parsed object is authenticated as it now stands.
 	parsed, _ = jwe.ParseJSON(wire)
-	parsed.Protected = header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM, jwe.Type: "swapped"}
-	if _, _, err := parsed.Decrypt(k.kw, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
+	parsed.Protected = header.Parameters{header.EncryptionAlgorithm: jwa.A128GCM, header.Type: "swapped"}
+	if _, _, err := (decrypterFor(k.kw)).DecryptJSON(parsed); !errors.Is(err, jwe.ErrDecryption) {
 		t.Fatalf("modified Protected: %v", err)
 	}
 	if !strings.Contains(string(wire), `"recipients"`) {
@@ -432,9 +435,9 @@ func TestJSONEmptyProtectedHeader(t *testing.T) {
 	key := make([]byte, 16)
 	rand.Read(key)
 	j, err := jwe.EncryptJSON(header.Parameters{},
-		header.Parameters{jwe.EncryptionAlgorithm: jwa.A128GCM},
+		header.Parameters{header.EncryptionAlgorithm: jwa.A128GCM},
 		[]byte("empty protected"), nil,
-		jwe.RecipientKey{Header: header.Parameters{jwe.Algorithm: jwa.A128KW}, Key: key})
+		jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A128KW}, Key: key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +452,7 @@ func TestJSONEmptyProtectedHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plaintext, _, err := parsed.Decrypt(key, jwe.DecryptOptions{})
+	plaintext, _, err := decrypterFor(key).DecryptJSON(parsed)
 	if err != nil || string(plaintext) != "empty protected" {
 		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
 	}
