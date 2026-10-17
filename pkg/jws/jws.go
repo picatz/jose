@@ -17,8 +17,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 )
@@ -122,7 +122,7 @@ func parse(input string, understood []string) (*Signature, error) {
 	}
 
 	// Decode header with strict validation
-	headerBytes, err := base64.Decode(parts[0])
+	headerBytes, err := base64url.Decode(parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode header: %w", err)
 	}
@@ -162,7 +162,7 @@ func parse(input string, understood []string) (*Signature, error) {
 	if parts[1] == "" {
 		payload = []byte{}
 	} else {
-		payload, err = base64.Decode(parts[1])
+		payload, err = base64url.Decode(parts[1])
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode payload: %w", err)
 		}
@@ -171,7 +171,7 @@ func parse(input string, understood []string) (*Signature, error) {
 	// Decode signature (can be empty for "none" algorithm)
 	var signature []byte
 	if parts[2] != "" {
-		signature, err = base64.Decode(parts[2])
+		signature, err = base64url.Decode(parts[2])
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode signature: %w", err)
 		}
@@ -217,10 +217,7 @@ func (t *Signature) compact() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		signatureB64, err := base64.Encode(t.Signature)
-		if err != nil {
-			return "", fmt.Errorf("failed to encode signature: %w", err)
-		}
+		signatureB64 := base64url.Encode(t.Signature)
 		return encodedHeader + ".." + signatureB64, nil
 	}
 	return t.computeString()
@@ -236,10 +233,7 @@ func (t *Signature) protectedSegment() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal header: %w", err)
 	}
-	headerB64, err := base64.Encode(headerBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode header: %w", err)
-	}
+	headerB64 := base64url.Encode(headerBytes)
 	return headerB64, nil
 }
 
@@ -250,28 +244,19 @@ func (t *Signature) computeString() (string, error) {
 		return "", fmt.Errorf("failed to marshal header: %w", err)
 	}
 
-	headerB64, err := base64.Encode(headerBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode header: %w", err)
-	}
+	headerB64 := base64url.Encode(headerBytes)
 
 	// Handle empty payload - base64url encoding of empty octets is empty string
 	var payloadB64 string
 	if len(t.Payload) == 0 {
 		payloadB64 = ""
 	} else {
-		payloadB64, err = base64.Encode(t.Payload)
-		if err != nil {
-			return "", fmt.Errorf("failed to encode payload: %w", err)
-		}
+		payloadB64 = base64url.Encode(t.Payload)
 	}
 
 	signatureB64 := ""
 	if len(t.Signature) > 0 {
-		signatureB64, err = base64.Encode(t.Signature)
-		if err != nil {
-			return "", fmt.Errorf("failed to encode signature: %w", err)
-		}
+		signatureB64 = base64url.Encode(t.Signature)
 	}
 
 	result := headerB64 + "." + payloadB64 + "." + signatureB64
@@ -309,20 +294,14 @@ func (t *Signature) signingInput() (string, error) {
 		return "", fmt.Errorf("failed to marshal header: %w", err)
 	}
 
-	headerB64, err := base64.Encode(headerBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode header: %w", err)
-	}
+	headerB64 := base64url.Encode(headerBytes)
 
 	// Handle empty payload - base64url encoding of empty octets is empty string
 	var payloadB64 string
 	if len(t.Payload) == 0 {
 		payloadB64 = ""
 	} else {
-		payloadB64, err = base64.Encode(t.Payload)
-		if err != nil {
-			return "", fmt.Errorf("failed to encode payload: %w", err)
-		}
+		payloadB64 = base64url.Encode(t.Payload)
 	}
 
 	return headerB64 + "." + payloadB64, nil

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwe"
@@ -232,12 +232,12 @@ func recipientsOf(m map[string]any) []any { return m["recipients"].([]any) }
 
 func protectedWith(t *testing.T, m map[string]any, f func(h map[string]any)) {
 	t.Helper()
-	raw, _ := base64.Decode(m["protected"].(string))
+	raw, _ := base64url.Decode(m["protected"].(string))
 	var h map[string]any
 	json.Unmarshal(raw, &h)
 	f(h)
 	out, _ := json.Marshal(h)
-	m["protected"], _ = base64.Encode(out)
+	m["protected"] = base64url.Encode(out)
 }
 
 func TestJSONParseRefusals(t *testing.T) {
@@ -246,7 +246,7 @@ func TestJSONParseRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b64 := func(s string) string { e, _ := base64.Encode([]byte(s)); return e }
+	b64 := func(s string) string { e := base64url.Encode([]byte(s)); return e }
 	cases := map[string][]byte{
 		"duplicate top-level member":    bytes.Replace(wire, []byte(`{"protected"`), []byte(`{"iv":"AAAA","protected"`), 1),
 		"duplicate in recipient header": bytes.Replace(wire, []byte(`"kid":"kw"`), []byte(`"kid":"kw","kid":"x"`), 1),
@@ -347,9 +347,9 @@ func TestJSONTamperingFailsUniformly(t *testing.T) {
 		t.Fatal(err)
 	}
 	flip := func(m map[string]any, name string) {
-		b, _ := base64.Decode(m[name].(string))
+		b, _ := base64url.Decode(m[name].(string))
 		b[len(b)/2] ^= 0x80
-		m[name], _ = base64.Encode(b)
+		m[name] = base64url.Encode(b)
 	}
 	cases := map[string]func(m map[string]any){
 		"tag":        func(m map[string]any) { flip(m, "tag") },
@@ -364,8 +364,8 @@ func TestJSONTamperingFailsUniformly(t *testing.T) {
 			protectedWith(t, m, func(h map[string]any) { h["typ"] = "evil" })
 		},
 		"protected re-encoded": func(m map[string]any) {
-			raw, _ := base64.Decode(m["protected"].(string))
-			m["protected"], _ = base64.Encode(append([]byte(" "), raw...))
+			raw, _ := base64url.Decode(m["protected"].(string))
+			m["protected"] = base64url.Encode(append([]byte(" "), raw...))
 		},
 		"encrypted key": func(m map[string]any) { flip(recipientsOf(m)[0].(map[string]any), "encrypted_key") },
 	}

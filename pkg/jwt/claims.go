@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 )
 
 // There are three classes of JWT Claim Names:
@@ -55,7 +55,7 @@ func (claims ClaimsSet) Base64URLString() (string, error) {
 		return "", fmt.Errorf("jwt: claims set encoding error: %w", err)
 	}
 
-	return base64.Encode(buff.Bytes())
+	return base64url.Encode(buff.Bytes()), nil
 }
 
 // Get returns the ClaimValue for the given ClaimName.

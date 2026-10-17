@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
@@ -190,11 +190,11 @@ func canonical(raw string) bool {
 		if segment == "" {
 			continue
 		}
-		decoded, err := base64.Decode(segment)
+		decoded, err := base64url.Decode(segment)
 		if err != nil {
 			return false
 		}
-		if again, err := base64.Encode(decoded); err != nil || again != segment {
+		if base64url.Encode(decoded) != segment {
 			return false
 		}
 	}

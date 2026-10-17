@@ -1,236 +1,138 @@
 package jwa_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/jwa"
 )
 
-func TestValidateAlgorithm(t *testing.T) {
+func TestAlgorithmClassification(t *testing.T) {
 	tests := []struct {
-		name        string
-		algorithm   jwa.Algorithm
-		allowedAlgs []jwa.Algorithm
-		expectError bool
-		expectedErr error
-		description string
+		alg                 jwa.Algorithm
+		symmetric           bool
+		keyManagement       bool
+		asymmetricSignature bool
 	}{
-		{
-			name:        "Valid known algorithm in allowed list",
-			algorithm:   jwa.RS256,
-			allowedAlgs: []jwa.Algorithm{jwa.RS256, jwa.HS256},
-			expectError: false,
-			description: "Should pass when algorithm is known and in allowed list",
-		},
-		{
-			name:        "Valid known algorithm with empty allowed list",
-			algorithm:   jwa.ES256,
-			allowedAlgs: []jwa.Algorithm{},
-			expectError: true,
-			expectedErr: jwa.ErrAlgorithmNotAllowed,
-			description: "Should fail when allowed list is empty (algorithm not in empty list)",
-		},
-		{
-			name:        "Valid known algorithm with nil allowed list",
-			algorithm:   jwa.PS256,
-			allowedAlgs: nil,
-			expectError: true,
-			expectedErr: jwa.ErrAlgorithmNotAllowed,
-			description: "Should fail when allowed list is nil (algorithm not in nil list)",
-		},
-		{
-			name:        "Unknown algorithm",
-			algorithm:   "UNKNOWN",
-			allowedAlgs: []jwa.Algorithm{"UNKNOWN"},
-			expectError: true,
-			expectedErr: jwa.ErrUnknownAlgorithm,
-			description: "Should fail with unknown algorithm error even if in allowed list",
-		},
-		{
-			name:        "Empty algorithm string",
-			algorithm:   "",
-			allowedAlgs: []jwa.Algorithm{""},
-			expectError: true,
-			expectedErr: jwa.ErrUnknownAlgorithm,
-			description: "Should fail with unknown algorithm error for empty string",
-		},
-		{
-			name:        "Known algorithm not in allowed list",
-			algorithm:   jwa.HS256,
-			allowedAlgs: []jwa.Algorithm{jwa.RS256, jwa.ES256},
-			expectError: true,
-			expectedErr: jwa.ErrAlgorithmNotAllowed,
-			description: "Should fail when known algorithm is not in allowed list",
-		},
-		{
-			name:        "None algorithm is known",
-			algorithm:   jwa.None,
-			allowedAlgs: []jwa.Algorithm{jwa.None},
-			expectError: false,
-			description: "None algorithm should be considered known (though insecure)",
-		},
-		{
-			name:        "None algorithm not in allowed list",
-			algorithm:   jwa.None,
-			allowedAlgs: []jwa.Algorithm{jwa.RS256, jwa.HS256},
-			expectError: true,
-			expectedErr: jwa.ErrAlgorithmNotAllowed,
-			description: "None algorithm should fail if not explicitly allowed",
-		},
-		{
-			name:        "All HMAC algorithms",
-			algorithm:   jwa.HS384,
-			allowedAlgs: []jwa.Algorithm{jwa.HS256, jwa.HS384, jwa.HS512},
-			expectError: false,
-			description: "HMAC algorithms should be validated correctly",
-		},
-		{
-			name:        "All RSA algorithms",
-			algorithm:   jwa.RS384,
-			allowedAlgs: []jwa.Algorithm{jwa.RS256, jwa.RS384, jwa.RS512},
-			expectError: false,
-			description: "RSA algorithms should be validated correctly",
-		},
-		{
-			name:        "All RSA-PSS algorithms",
-			algorithm:   jwa.PS512,
-			allowedAlgs: []jwa.Algorithm{jwa.PS256, jwa.PS384, jwa.PS512},
-			expectError: false,
-			description: "RSA-PSS algorithms should be validated correctly",
-		},
-		{
-			name:        "All ECDSA algorithms",
-			algorithm:   jwa.ES512,
-			allowedAlgs: []jwa.Algorithm{jwa.ES256, jwa.ES384, jwa.ES512},
-			expectError: false,
-			description: "ECDSA algorithms should be validated correctly",
-		},
-		{
-			name:        "EdDSA algorithm",
-			algorithm:   jwa.EdDSA,
-			allowedAlgs: []jwa.Algorithm{jwa.EdDSA},
-			expectError: false,
-			description: "EdDSA algorithm should be validated correctly",
-		},
-		{
-			name:        "Case sensitive algorithm check",
-			algorithm:   "rs256", // lowercase
-			allowedAlgs: []jwa.Algorithm{"rs256"},
-			expectError: true,
-			expectedErr: jwa.ErrUnknownAlgorithm,
-			description: "Algorithm validation should be case sensitive",
-		},
-		{
-			name:        "Mixed case in allowed list",
-			algorithm:   jwa.RS256,
-			allowedAlgs: []jwa.Algorithm{"rs256", jwa.RS256, "RS256"},
-			expectError: false,
-			description: "Should find exact match in allowed list regardless of other case variants",
-		},
+		{jwa.HS256, true, false, false},
+		{jwa.HS384, true, false, false},
+		{jwa.HS512, true, false, false},
+		{jwa.RS256, false, false, true},
+		{jwa.RS384, false, false, true},
+		{jwa.RS512, false, false, true},
+		{jwa.PS256, false, false, true},
+		{jwa.PS384, false, false, true},
+		{jwa.PS512, false, false, true},
+		{jwa.ES256, false, false, true},
+		{jwa.ES384, false, false, true},
+		{jwa.ES512, false, false, true},
+		{jwa.EdDSA, false, false, true},
+		{jwa.None, false, false, false},
+		{jwa.ES256K, false, false, false},
+		{jwa.RSAOAEP, false, true, false},
+		{jwa.RSAOAEP256, false, true, false},
+		{jwa.A128KW, true, true, false},
+		{jwa.A192KW, true, true, false},
+		{jwa.A256KW, true, true, false},
+		{jwa.Direct, true, true, false},
+		{jwa.ECDHES, false, true, false},
+		{jwa.ECDHESA128KW, false, true, false},
+		{jwa.ECDHESA192KW, false, true, false},
+		{jwa.ECDHESA256KW, false, true, false},
+		{"", false, false, false},
+		{"hs256", false, false, false},
+		{"RSA1_5", false, false, false},
+		{"unknown", false, false, false},
 	}
+	for _, tt := range tests {
+		t.Run(string(tt.alg), func(t *testing.T) {
+			if got := tt.alg.IsSymmetric(); got != tt.symmetric {
+				t.Errorf("IsSymmetric() = %v, want %v", got, tt.symmetric)
+			}
+			if got := tt.alg.IsKeyManagement(); got != tt.keyManagement {
+				t.Errorf("IsKeyManagement() = %v, want %v", got, tt.keyManagement)
+			}
+			if got := jwa.IsAsymmetricSignature(tt.alg); got != tt.asymmetricSignature {
+				t.Errorf("IsAsymmetricSignature() = %v, want %v", got, tt.asymmetricSignature)
+			}
+		})
+	}
+}
 
+func TestContentEncryption(t *testing.T) {
+	tests := []struct {
+		enc  jwa.ContentEncryption
+		want bool
+	}{
+		{jwa.A128CBCHS256, true},
+		{jwa.A192CBCHS384, true},
+		{jwa.A256CBCHS512, true},
+		{jwa.A128GCM, true},
+		{jwa.A192GCM, true},
+		{jwa.A256GCM, true},
+		{"", false},
+		{"a128gcm", false},
+		{"A128CBC", false},
+		{"RSA-OAEP", false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.enc), func(t *testing.T) {
+			if got := tt.enc.IsContentEncryption(); got != tt.want {
+				t.Errorf("IsContentEncryption() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestForKey(t *testing.T) {
+	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	p521, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	edPub, edPriv, _ := ed25519.GenerateKey(rand.Reader)
+	rsa2048, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaSmall, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p224, _ := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+
+	tests := []struct {
+		name    string
+		key     any
+		want    jwa.Algorithm
+		wantErr error
+	}{
+		{"P-256 private", p256, jwa.ES256, nil},
+		{"P-256 public", &p256.PublicKey, jwa.ES256, nil},
+		{"P-384 private", p384, jwa.ES384, nil},
+		{"P-521 public", &p521.PublicKey, jwa.ES512, nil},
+		{"P-224", p224, "", jwa.ErrUnknownAlgorithm},
+		{"Ed25519 private", edPriv, jwa.EdDSA, nil},
+		{"Ed25519 public", edPub, jwa.EdDSA, nil},
+		{"RSA 2048 private", rsa2048, jwa.PS256, nil},
+		{"RSA 2048 public", &rsa2048.PublicKey, jwa.PS256, nil},
+		{"RSA 1024", rsaSmall, "", jwa.ErrAlgorithmNotAllowed},
+		{"HMAC secret", []byte("secret"), "", jwa.ErrUnknownAlgorithm},
+		{"nil", nil, "", jwa.ErrUnknownAlgorithm},
+		{"string", "secret", "", jwa.ErrUnknownAlgorithm},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := jwa.ValidateAlgorithm(tt.algorithm, tt.allowedAlgs)
-
-			if tt.expectError {
-				if err == nil {
-					t.Fatalf("ValidateAlgorithm(%q, %q) error = nil, want non-nil: %s", tt.algorithm, tt.allowedAlgs, tt.description)
-				}
-				if tt.expectedErr != nil && !errors.Is(err, tt.expectedErr) {
-					t.Fatalf("ValidateAlgorithm(%q, %q) error = %v, want %v", tt.algorithm, tt.allowedAlgs, err, tt.expectedErr)
-				}
-			} else if err != nil {
-				t.Fatalf("ValidateAlgorithm(%q, %q) error = %v: %s", tt.algorithm, tt.allowedAlgs, err, tt.description)
+			got, err := jwa.ForKey(tt.key)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ForKey() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("ForKey() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestValidateAlgorithm_AllKnownAlgorithms(t *testing.T) {
-	knownAlgs := []jwa.Algorithm{
-		jwa.HS256, jwa.HS384, jwa.HS512,
-		jwa.RS256, jwa.RS384, jwa.RS512,
-		jwa.PS256, jwa.PS384, jwa.PS512,
-		jwa.ES256, jwa.ES384, jwa.ES512,
-		jwa.EdDSA, jwa.None,
-	}
-
-	for _, alg := range knownAlgs {
-		t.Run(string(alg), func(t *testing.T) {
-			err := jwa.ValidateAlgorithm(alg, []jwa.Algorithm{alg})
-			if err != nil {
-				t.Fatalf("ValidateAlgorithm(%q) error = %v, want nil for a known algorithm", alg, err)
-			}
-		})
-	}
-}
-
-func TestValidateAlgorithm_ErrorWrapping(t *testing.T) {
-	t.Run("Unknown algorithm error message", func(t *testing.T) {
-		err := jwa.ValidateAlgorithm("FAKE_ALG", []jwa.Algorithm{"FAKE_ALG"})
-		if err == nil {
-			t.Fatal("jwa.ValidateAlgorithm() error = nil, want non-nil")
-		}
-		if !errors.Is(err, jwa.ErrUnknownAlgorithm) {
-			t.Fatalf("jwa.ValidateAlgorithm() error = %v, want %v", err, jwa.ErrUnknownAlgorithm)
-		}
-		if !strings.Contains(err.Error(), "FAKE_ALG") {
-			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "FAKE_ALG")
-		}
-		if !strings.Contains(err.Error(), "is not a known algorithm") {
-			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "is not a known algorithm")
-		}
-	})
-
-	t.Run("Algorithm not allowed error message", func(t *testing.T) {
-		err := jwa.ValidateAlgorithm(jwa.RS256, []jwa.Algorithm{jwa.HS256})
-		if err == nil {
-			t.Fatal("jwa.ValidateAlgorithm() error = nil, want non-nil")
-		}
-		if !errors.Is(err, jwa.ErrAlgorithmNotAllowed) {
-			t.Fatalf("jwa.ValidateAlgorithm() error = %v, want %v", err, jwa.ErrAlgorithmNotAllowed)
-		}
-		if !strings.Contains(err.Error(), "RS256") {
-			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "RS256")
-		}
-		if !strings.Contains(err.Error(), "is not allowed") {
-			t.Fatalf("err.Error() = %q, want it to contain %q", err.Error(), "is not allowed")
-		}
-	})
-}
-
-func BenchmarkValidateAlgorithm(b *testing.B) {
-	allowedAlgs := []jwa.Algorithm{
-		jwa.RS256, jwa.RS384, jwa.RS512,
-		jwa.ES256, jwa.ES384, jwa.ES512,
-		jwa.HS256, jwa.HS384, jwa.HS512,
-	}
-
-	b.Run("Valid algorithm", func(b *testing.B) {
-		for b.Loop() {
-			_ = jwa.ValidateAlgorithm(jwa.RS256, allowedAlgs)
-		}
-	})
-
-	b.Run("Invalid algorithm", func(b *testing.B) {
-		for b.Loop() {
-			_ = jwa.ValidateAlgorithm("UNKNOWN", allowedAlgs)
-		}
-	})
-
-	b.Run("Algorithm not in allowed list", func(b *testing.B) {
-		for b.Loop() {
-			_ = jwa.ValidateAlgorithm(jwa.EdDSA, allowedAlgs)
-		}
-	})
-}
-
-func TestValidateAlgorithm_ES256KNotImplemented(t *testing.T) {
-	err := jwa.ValidateAlgorithm(jwa.ES256K, []jwa.Algorithm{jwa.ES256K})
-	if !errors.Is(err, jwa.ErrUnknownAlgorithm) {
-		t.Fatalf("ValidateAlgorithm(ES256K) error = %v, want ErrUnknownAlgorithm", err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 )
 
 // Key type ("kty") values.
@@ -63,7 +63,7 @@ func member(v Value, name string) ([]byte, error) {
 	if !ok {
 		return nil, invalid("%q is %T, not a string", name, raw)
 	}
-	b, err := base64.Decode(s)
+	b, err := base64url.Decode(s)
 	if err != nil {
 		return nil, invalid("%q is not base64url: %v", name, err)
 	}
@@ -362,7 +362,7 @@ func PrivateKey(v Value) (crypto.PrivateKey, error) {
 
 // encode base64url-encodes b, which callers guarantee is non-empty.
 func encode(b []byte) string {
-	s, _ := base64.Encode(b)
+	s := base64url.Encode(b)
 	return s
 }
 

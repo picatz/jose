@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -156,7 +156,7 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 		if _, err := rand.Read(id); err != nil {
 			return nil, fmt.Errorf("jwtchain: jti: %w", err)
 		}
-		r.ID, _ = base64.Encode(id)
+		r.ID = base64url.Encode(id)
 	}
 	claims[jwt.JWTID] = r.ID
 	if !r.NotBefore.IsZero() {

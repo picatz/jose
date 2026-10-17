@@ -8,12 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/picatz/jose/pkg/keyutil"
 )
 
 // rawToken assembles a compact token from arbitrary header, claims and
@@ -32,19 +31,9 @@ func rawToken(t testing.TB, h, claims any, signature []byte) string {
 				t.Fatal(err)
 			}
 		}
-		out, err := base64.Encode(b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
+		return base64url.Encode(b)
 	}
-	var sig string
-	if len(signature) > 0 {
-		var err error
-		if sig, err = base64.Encode(signature); err != nil {
-			t.Fatal(err)
-		}
-	}
+	sig := base64url.Encode(signature)
 	return enc(h) + "." + enc(claims) + "." + sig
 }
 
@@ -68,7 +57,7 @@ func requireRefused(t testing.TB, v *jwt.Verifier, token string, sentinel error)
 func TestSecurityVulnerabilities(t *testing.T) {
 	t.Run("Algorithm Confusion Attack", func(t *testing.T) {
 		// An RSA public key must not be usable as an HMAC secret.
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+		rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 		token := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
@@ -118,7 +107,7 @@ func TestSecurityVulnerabilities(t *testing.T) {
 		// segment holds and however the algorithm list is configured.
 		h := header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.None}
 		claims := jwt.ClaimsSet{jwt.Subject: "test"}
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+		rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 		for name, token := range map[string]string{
 			"empty signature":     rawToken(t, h, claims, nil),
@@ -181,7 +170,7 @@ func TestTimingAttackResistance(t *testing.T) {
 }
 
 func TestClockSkewTolerance(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 	now := time.Now()
 
 	t.Run("Expiration with Leeway", func(t *testing.T) {
@@ -233,7 +222,7 @@ func TestClockSkewTolerance(t *testing.T) {
 
 func TestInvalidSignatures(t *testing.T) {
 	t.Run("Tampered Signature", func(t *testing.T) {
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+		rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 		token := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
@@ -245,10 +234,7 @@ func TestInvalidSignatures(t *testing.T) {
 		sig := append([]byte(nil), token.Signature...)
 		sig[0] ^= 0xFF
 		parts := strings.Split(token.String(), ".")
-		sigB64, err := base64.Encode(sig)
-		if err != nil {
-			t.Fatal(err)
-		}
+		sigB64 := base64url.Encode(sig)
 		tampered := parts[0] + "." + parts[1] + "." + sigB64
 
 		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), tampered, jwt.ErrSignature)
@@ -259,7 +245,7 @@ func TestInvalidSignatures(t *testing.T) {
 	})
 
 	t.Run("Tampered Claims", func(t *testing.T) {
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+		rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 		token := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
@@ -268,16 +254,13 @@ func TestInvalidSignatures(t *testing.T) {
 		)
 
 		parts := strings.Split(token.String(), ".")
-		claims, err := base64.Encode([]byte(`{"sub":"admin"}`))
-		if err != nil {
-			t.Fatal(err)
-		}
+		claims := base64url.Encode([]byte(`{"sub":"admin"}`))
 		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), parts[0]+"."+claims+"."+parts[2], jwt.ErrSignature)
 	})
 
 	t.Run("Wrong Key Type for Algorithm", func(t *testing.T) {
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
-		ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+		rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
+		ecdsaKeyPair := testNewKeyPair(t, testNewECDSAKeyPair)
 
 		rsaToken := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
@@ -290,7 +273,7 @@ func TestInvalidSignatures(t *testing.T) {
 	})
 
 	t.Run("ECDSA Signature Length Validation", func(t *testing.T) {
-		ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+		ecdsaKeyPair := testNewKeyPair(t, testNewECDSAKeyPair)
 
 		token := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.ES256},
@@ -299,10 +282,7 @@ func TestInvalidSignatures(t *testing.T) {
 		)
 
 		parts := strings.Split(token.String(), ".")
-		sig, err := base64.Encode([]byte("invalid-length-signature"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		sig := base64url.Encode([]byte("invalid-length-signature"))
 		requireRefused(t, sigOnlyVerifier(ecdsaKeyPair.public), parts[0]+"."+parts[1]+"."+sig, jwt.ErrSignature)
 	})
 }
@@ -349,7 +329,7 @@ func TestKeyValidation(t *testing.T) {
 
 	t.Run("EdDSA Key Size Validation", func(t *testing.T) {
 		// A 16-byte "public key" never verifies an EdDSA token.
-		eddsaKeyPair := testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+		eddsaKeyPair := testNewKeyPair(t, testNewEdDSAKeyPair)
 		token := testToken(t,
 			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.EdDSA},
 			jwt.ClaimsSet{jwt.Subject: "test"},
@@ -417,7 +397,7 @@ func TestParsingVulnerabilities(t *testing.T) {
 }
 
 func TestAudienceValidation(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 	audienceVerifier := func(audience string) *jwt.Verifier {
 		v := sigOnlyVerifier(rsaKeyPair.public)
@@ -479,7 +459,7 @@ func TestAudienceValidation(t *testing.T) {
 // RFC 7519 §4: a JWT whose header or claims repeat a name is refused, so
 // two verifiers cannot read different values from the same token.
 func TestDuplicateNamesRefused(t *testing.T) {
-	encode := func(s string) string { out, _ := base64.Encode([]byte(s)); return out }
+	encode := func(s string) string { out := base64url.Encode([]byte(s)); return out }
 	verifier := sigOnlyVerifier(testHMACSecretKey, jwa.HS256)
 	for name, token := range map[string]string{
 		"header": encode(`{"alg":"none","alg":"HS256","typ":"JWT"}`) + "." + encode(`{"sub":"alice"}`) + ".c2ln",

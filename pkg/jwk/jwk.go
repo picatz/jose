@@ -4,7 +4,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 )
 
 // https://datatracker.ietf.org/doc/html/rfc7517#section-4
@@ -85,7 +85,7 @@ func Validate(v Value) error {
 		}
 
 		if x, ok := xValue.(string); ok {
-			_, err := base64.Decode(x)
+			_, err := base64url.Decode(x)
 			if err != nil {
 				return fmt.Errorf("invalid base64 encoding for %q: %w", X, err)
 			}
@@ -99,7 +99,7 @@ func Validate(v Value) error {
 		}
 
 		if y, ok := yValue.(string); ok {
-			_, err := base64.Decode(y)
+			_, err := base64url.Decode(y)
 			if err != nil {
 				return fmt.Errorf("invalid base64 encoding for %q: %w", Y, err)
 			}
@@ -113,7 +113,7 @@ func Validate(v Value) error {
 		}
 
 		if n, ok := nValue.(string); ok {
-			_, err := base64.Decode(n)
+			_, err := base64url.Decode(n)
 			if err != nil {
 				return fmt.Errorf("invalid base64 encoding for %q: %w", N, err)
 			}
@@ -127,7 +127,7 @@ func Validate(v Value) error {
 		}
 
 		if e, ok := eValue.(string); ok {
-			_, err := base64.Decode(e)
+			_, err := base64url.Decode(e)
 			if err != nil {
 				return fmt.Errorf("invalid base64 encoding for %q: %w", E, err)
 			}
@@ -138,7 +138,7 @@ func Validate(v Value) error {
 		dValue, ok := v[D]
 		if ok { // optional
 			if d, ok := dValue.(string); ok {
-				_, err := base64.Decode(d)
+				_, err := base64url.Decode(d)
 				if err != nil {
 					return fmt.Errorf("invalid base64 encoding for %q: %w", D, err)
 				}
@@ -260,7 +260,7 @@ func HMACSecretKey(v Value) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get symmetric key: %w", err)
 	}
-	return base64.Decode(key)
+	return base64url.Decode(key)
 }
 
 // Ed25519PublicKey returns the Ed25519 public key, or an error if the
@@ -272,7 +272,7 @@ func Ed25519PublicKey(v Value) (pkey ed25519.PublicKey, err error) {
 		return
 	}
 
-	xBytes, err := base64.Decode(x)
+	xBytes, err := base64url.Decode(x)
 	if err != nil {
 		err = fmt.Errorf("failed to decode Ed25519 public key X: %w", err)
 		return

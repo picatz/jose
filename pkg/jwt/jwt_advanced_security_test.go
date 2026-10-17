@@ -5,19 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/picatz/jose/pkg/keyutil"
 )
-
-func must[T any](value T, err error) T {
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
 
 // TestRFC7519Compliance tests compliance with RFC 7519 validation requirements
 func TestRFC7519Compliance(t *testing.T) {
@@ -104,21 +96,21 @@ func TestRFC7519Compliance(t *testing.T) {
 			{
 				name:        "Invalid base64 in header",
 				header:      "invalid_base64!@#",
-				payload:     must(base64.Encode([]byte(`{"sub":"test"}`))),
+				payload:     base64url.Encode([]byte(`{"sub":"test"}`)),
 				signature:   "",
 				expectedErr: "failed to decode JOSE header base64",
 			},
 			{
 				name:        "Invalid base64 in payload",
-				header:      must(base64.Encode([]byte(`{"alg":"none"}`))),
+				header:      base64url.Encode([]byte(`{"alg":"none"}`)),
 				payload:     "invalid_base64!@#",
 				signature:   "",
 				expectedErr: "failed to decode claims base64",
 			},
 			{
 				name:        "Invalid base64 in signature",
-				header:      must(base64.Encode([]byte(`{"alg":"none"}`))),
-				payload:     must(base64.Encode([]byte(`{"sub":"test"}`))),
+				header:      base64url.Encode([]byte(`{"alg":"none"}`)),
+				payload:     base64url.Encode([]byte(`{"sub":"test"}`)),
 				signature:   "invalid_base64!@#",
 				expectedErr: "failed to decode signature base64",
 			},
@@ -144,26 +136,26 @@ func TestRFC7519Compliance(t *testing.T) {
 		}{
 			{
 				name:        "Invalid JSON in header",
-				header:      must(base64.Encode([]byte(`{invalid json}`))),
-				payload:     must(base64.Encode([]byte(`{"sub":"test"}`))),
+				header:      base64url.Encode([]byte(`{invalid json}`)),
+				payload:     base64url.Encode([]byte(`{"sub":"test"}`)),
 				expectedErr: "failed to decode JOSE header JSON",
 			},
 			{
 				name:        "Invalid JSON in payload",
-				header:      must(base64.Encode([]byte(`{"alg":"none"}`))),
-				payload:     must(base64.Encode([]byte(`{invalid json}`))),
+				header:      base64url.Encode([]byte(`{"alg":"none"}`)),
+				payload:     base64url.Encode([]byte(`{invalid json}`)),
 				expectedErr: "failed to decode claims JSON",
 			},
 			{
 				name:        "Non-object JSON in header (array)",
-				header:      must(base64.Encode([]byte(`["alg", "none"]`))),
-				payload:     must(base64.Encode([]byte(`{"sub":"test"}`))),
+				header:      base64url.Encode([]byte(`["alg", "none"]`)),
+				payload:     base64url.Encode([]byte(`{"sub":"test"}`)),
 				expectedErr: "failed to decode JOSE header JSON",
 			},
 			{
 				name:        "Non-object JSON in payload (string)",
-				header:      must(base64.Encode([]byte(`{"alg":"none"}`))),
-				payload:     must(base64.Encode([]byte(`"just a string"`))),
+				header:      base64url.Encode([]byte(`{"alg":"none"}`)),
+				payload:     base64url.Encode([]byte(`"just a string"`)),
 				expectedErr: "failed to decode claims JSON",
 			},
 		}
@@ -214,17 +206,11 @@ func TestRFC7519Compliance(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				header, err := base64.Encode([]byte(`{"alg":"none"}`))
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
-				payload, err := base64.Encode([]byte(test.claims))
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
+				header := base64url.Encode([]byte(`{"alg":"none"}`))
+				payload := base64url.Encode([]byte(test.claims))
 				jwtString := header + "." + payload + "."
 
-				_, err = jwt.Parse(jwtString)
+				_, err := jwt.Parse(jwtString)
 				if test.expectedErr != "" {
 					if err == nil || !strings.Contains(err.Error(), test.expectedErr) {
 						t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, test.expectedErr)
@@ -278,14 +264,8 @@ func TestSecurityEdgeCases(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				header, err := base64.Encode([]byte(tt.headerJson))
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
-				payload, err := base64.Encode([]byte(`{"sub":"test"}`))
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
+				header := base64url.Encode([]byte(tt.headerJson))
+				payload := base64url.Encode([]byte(`{"sub":"test"}`))
 				jwtString := header + "." + payload + "."
 
 				// Whatever Parse makes of the header, a Verifier refuses it:
@@ -411,7 +391,7 @@ func TestSecurityEdgeCases(t *testing.T) {
 // The Verifier has no switch to allow it, so every shape of unsecured JWT
 // (RFC 7519 §6) is refused, with or without "none" in the algorithm list.
 func TestNoneAlgorithmCompliance(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 	tests := []struct {
 		name      string
 		signature []byte

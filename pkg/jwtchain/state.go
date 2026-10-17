@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -291,7 +291,7 @@ func holderOf(cnf map[string]any) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("\"jkt\" must be a string")
 		}
-		if raw, err := base64.Decode(s); err != nil || len(raw) != 32 {
+		if raw, err := base64url.Decode(s); err != nil || len(raw) != 32 {
 			return "", fmt.Errorf("\"jkt\" must be a base64url SHA-256 thumbprint")
 		}
 		return s, nil

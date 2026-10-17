@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/dpop"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -163,7 +163,7 @@ func TestVerifyRejects(t *testing.T) {
 	}
 	d := make([]byte, 32)
 	key.D.FillBytes(d)
-	private[jwk.D], _ = base64.Encode(d)
+	private[jwk.D] = base64url.Encode(d)
 
 	goodHeader := func() jws.Header {
 		return jws.Header{header.Type: dpop.Type, header.Algorithm: jwa.ES256, header.JSONWebKey: public}
@@ -345,9 +345,6 @@ func mustJSON(t *testing.T, v any) []byte {
 
 func mustEncode(t *testing.T, b []byte) string {
 	t.Helper()
-	s, err := base64.Encode(b)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := base64url.Encode(b)
 	return s
 }

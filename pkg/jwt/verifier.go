@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -137,7 +137,7 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		}
 		kid, _ := v[jwk.KeyID].(string)
 		alg, _ := v[jwk.Algorithm].(string)
-		out = append(out, Key{ID: kid, Algorithm: alg, Public: public})
+		out = append(out, Key{ID: kid, Algorithm: jwa.Algorithm(alg), Public: public})
 	}
 	return out, nil
 }
@@ -520,11 +520,14 @@ func typeAccepted(typ string, accepted []string) bool {
 // and caches keyed by the raw token cannot be bypassed.
 func canonical(token string) bool {
 	for segment := range strings.SplitSeq(token, ".") {
-		decoded, err := base64.Decode(segment)
+		if segment == "" {
+			return false
+		}
+		decoded, err := base64url.Decode(segment)
 		if err != nil {
 			return false
 		}
-		if again, err := base64.Encode(decoded); err != nil || again != segment {
+		if base64url.Encode(decoded) != segment {
 			return false
 		}
 	}

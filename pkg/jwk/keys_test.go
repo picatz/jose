@@ -11,7 +11,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/jwk"
 	"github.com/picatz/jose/pkg/jwk/thumbprint"
 )
@@ -42,7 +42,7 @@ func TestPublicValueUsesFixedWidthCoordinates(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		for _, member := range []string{jwk.X, jwk.Y} {
-			b, err := base64.Decode(v[member].(string))
+			b, err := base64url.Decode(v[member].(string))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,9 +69,9 @@ func TestPublicKeyRejectsOffCurvePoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	y, _ := base64.Decode(v[jwk.Y].(string))
+	y, _ := base64url.Decode(v[jwk.Y].(string))
 	y[len(y)-1] ^= 1
-	v[jwk.Y], _ = base64.Encode(y)
+	v[jwk.Y] = base64url.Encode(y)
 	if _, err := jwk.PublicKey(v); !errors.Is(err, jwk.ErrInvalidKey) {
 		t.Fatalf("PublicKey(off-curve) = %v, want ErrInvalidKey", err)
 	}
@@ -104,13 +104,13 @@ func TestPrivateKeyRoundTrips(t *testing.T) {
 	ecValue, _ := jwk.PublicValue(ecKey)
 	ecD := make([]byte, 48)
 	ecKey.D.FillBytes(ecD)
-	ecValue[jwk.D], _ = base64.Encode(ecD)
+	ecValue[jwk.D] = base64url.Encode(ecD)
 
 	edValue, _ := jwk.PublicValue(edKey)
-	edValue[jwk.D], _ = base64.Encode(edKey.Seed())
+	edValue[jwk.D] = base64url.Encode(edKey.Seed())
 
 	xValue, _ := jwk.PublicValue(xKey)
-	xValue[jwk.D], _ = base64.Encode(xKey.Bytes())
+	xValue[jwk.D] = base64url.Encode(xKey.Bytes())
 
 	for name, tc := range map[string]struct {
 		value  jwk.Value
@@ -142,7 +142,7 @@ func TestPrivateKeyRoundTrips(t *testing.T) {
 	// A private scalar that does not match the public point is rejected.
 	other, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	other.D.FillBytes(ecD)
-	ecValue[jwk.D], _ = base64.Encode(ecD)
+	ecValue[jwk.D] = base64url.Encode(ecD)
 	if _, err := jwk.PrivateKey(ecValue); !errors.Is(err, jwk.ErrInvalidKey) {
 		t.Fatalf("mismatched EC private key: %v", err)
 	}
@@ -154,9 +154,9 @@ func TestPrivateKeyRSA(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ := jwk.PublicValue(key)
-	v[jwk.D], _ = base64.Encode(key.D.Bytes())
-	v[jwk.P], _ = base64.Encode(key.Primes[0].Bytes())
-	v[jwk.Q], _ = base64.Encode(key.Primes[1].Bytes())
+	v[jwk.D] = base64url.Encode(key.D.Bytes())
+	v[jwk.P] = base64url.Encode(key.Primes[0].Bytes())
+	v[jwk.Q] = base64url.Encode(key.Primes[1].Bytes())
 	private, err := jwk.PrivateKey(v)
 	if err != nil {
 		t.Fatal(err)
@@ -206,8 +206,8 @@ func TestThumbprintRejectsMalformedMembers(t *testing.T) {
 func TestPublicKeyRejectsOversizedRSA(t *testing.T) {
 	n := make([]byte, jwk.MaxRSAModulusBytes+1)
 	n[0], n[len(n)-1] = 0xc5, 0x01
-	encoded, _ := base64.Encode(n)
-	maximal, _ := base64.Encode(n[:jwk.MaxRSAModulusBytes])
+	encoded := base64url.Encode(n)
+	maximal := base64url.Encode(n[:jwk.MaxRSAModulusBytes])
 	if _, err := jwk.PublicKey(jwk.Value{jwk.KeyType: "RSA", jwk.N: encoded, jwk.E: "AQAB"}); !errors.Is(err, jwk.ErrInvalidKey) {
 		t.Fatalf("PublicKey() of a %d-bit modulus error = %v, want ErrInvalidKey", len(n)*8, err)
 	}

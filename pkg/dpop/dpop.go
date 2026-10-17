@@ -33,7 +33,7 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 )
 
 // Media type, header and error names.
@@ -113,7 +113,7 @@ var (
 // https://www.rfc-editor.org/rfc/rfc9449.html#section-4.2
 func AccessTokenHash(accessToken string) string {
 	sum := sha256.Sum256([]byte(accessToken))
-	s, _ := base64.Encode(sum[:])
+	s := base64url.Encode(sum[:])
 	return s
 }
 

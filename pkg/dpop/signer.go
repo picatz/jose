@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -129,7 +129,7 @@ func (s *Signer) Proof(method, uri string, opts ProofOptions) (string, error) {
 	if _, err := rand.Read(jti); err != nil {
 		return "", fmt.Errorf("dpop: jti: %w", err)
 	}
-	jtiString, _ := base64.Encode(jti)
+	jtiString := base64url.Encode(jti)
 
 	claims := map[string]any{
 		ClaimJWTID:      jtiString,

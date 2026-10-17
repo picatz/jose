@@ -77,7 +77,7 @@ func TestJWSBasicFlow(t *testing.T) {
 
 			// Create header
 			h := Header{
-				header.Algorithm: tt.algorithm,
+				header.Algorithm: string(tt.algorithm),
 				header.Type:      "JWS",
 			}
 
@@ -202,7 +202,7 @@ func TestJWSParsing(t *testing.T) {
 	})
 
 	t.Run("invalid JSON header", func(t *testing.T) {
-		invalidHeader := "eyJpbnZhbGlkIGpzb24=" // {"invalid json
+		invalidHeader := "eyJpbnZhbGlkIGpzb24" // {"invalid json
 		_, err := Parse(invalidHeader + ".payload.signature")
 		if err == nil || !strings.Contains(err.Error(), "failed to parse header") {
 			t.Fatalf("Parse() error = %v, want error containing %q", err, "failed to parse header")

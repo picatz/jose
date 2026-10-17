@@ -47,10 +47,48 @@ func ForKey(key any) (Algorithm, error) {
 }
 
 // IsAsymmetricSignature reports whether alg is a registered asymmetric JWS
-// algorithm this package implements. It is false for "none" and for HMAC.
+// algorithm this package implements
+// (https://www.rfc-editor.org/rfc/rfc7518.html#section-3.1). It is false for "none" and for HMAC.
 func IsAsymmetricSignature(alg Algorithm) bool {
 	switch alg {
 	case RS256, RS384, RS512, PS256, PS384, PS512, ES256, ES384, ES512, EdDSA:
+		return true
+	}
+	return false
+}
+
+// IsSymmetric reports whether alg uses a shared secret rather than a key pair:
+// the HMAC signature algorithms (HS256, HS384, HS512,
+// https://www.rfc-editor.org/rfc/rfc7518.html#section-3.2) and the symmetric
+// key management algorithms (A128KW, A192KW, A256KW and "dir",
+// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.4 and
+// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.5).
+func (alg Algorithm) IsSymmetric() bool {
+	switch alg {
+	case HS256, HS384, HS512, A128KW, A192KW, A256KW, Direct:
+		return true
+	}
+	return false
+}
+
+// IsKeyManagement reports whether alg is a JWE key management algorithm
+// ("alg" in a JWE header) this package names:
+// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.1
+func (alg Algorithm) IsKeyManagement() bool {
+	switch alg {
+	case RSAOAEP, RSAOAEP256, A128KW, A192KW, A256KW, Direct,
+		ECDHES, ECDHESA128KW, ECDHESA192KW, ECDHESA256KW:
+		return true
+	}
+	return false
+}
+
+// IsContentEncryption reports whether enc is a JWE content encryption
+// algorithm ("enc" in a JWE header) this package names:
+// https://www.rfc-editor.org/rfc/rfc7518.html#section-5.1
+func (enc ContentEncryption) IsContentEncryption() bool {
+	switch enc {
+	case A128CBCHS256, A192CBCHS384, A256CBCHS512, A128GCM, A192GCM, A256GCM:
 		return true
 	}
 	return false
