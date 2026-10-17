@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -30,14 +31,14 @@ type cookbookJSON struct {
 	} `json:"output"`
 }
 
-func cookbookVerifyKey(t *testing.T, value jwk.Value) any {
+func cookbookVerifyKey(t *testing.T, value jwk.Key) any {
 	t.Helper()
 	var (
 		key any
 		err error
 	)
 	if value[jwk.KeyType] == jwk.KeyTypeOct {
-		key, err = jwk.HMACSecretKey(value)
+		key, err = base64url.Decode(value[jwk.K].(string))
 	} else {
 		key, err = jwk.PublicKey(value)
 	}
@@ -65,13 +66,13 @@ func TestCookbookJSONSerialization(t *testing.T) {
 			if err := json.Unmarshal(raw, &vector); err != nil {
 				t.Fatal(err)
 			}
-			var keys []jwk.Value
+			var keys []jwk.Key
 			if err := json.Unmarshal(vector.Input.Key, &keys); err != nil {
-				var single jwk.Value
+				var single jwk.Key
 				if err := json.Unmarshal(vector.Input.Key, &single); err != nil {
 					t.Fatal(err)
 				}
-				keys = []jwk.Value{single}
+				keys = []jwk.Key{single}
 			}
 			for _, output := range []json.RawMessage{vector.Output.JSON, vector.Output.JSONFlat} {
 				if output == nil {

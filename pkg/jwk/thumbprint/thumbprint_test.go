@@ -10,7 +10,7 @@ import (
 )
 
 func TestGenerate_EC(t *testing.T) {
-	value := jwk.Value{
+	value := jwk.Key{
 		jwk.KeyType: "EC",
 		jwk.Curve:   "P-256",
 		jwk.X:       "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
@@ -32,7 +32,7 @@ func TestGenerate_EC(t *testing.T) {
 }
 
 func TestGenerate_RSA(t *testing.T) {
-	value := jwk.Value{
+	value := jwk.Key{
 		jwk.KeyType:   "RSA",
 		jwk.N:         "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
 		jwk.E:         "AQAB",
@@ -58,7 +58,7 @@ func TestGenerate_RSA(t *testing.T) {
 //
 // https://www.rfc-editor.org/rfc/rfc9278.html#section-3
 func TestURN(t *testing.T) {
-	key, err := jwk.PublicKey(jwk.Value{
+	key, err := jwk.PublicKey(jwk.Key{
 		jwk.KeyType: "RSA",
 		jwk.N:       "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
 		jwk.E:       "AQAB",

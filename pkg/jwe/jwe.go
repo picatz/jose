@@ -370,7 +370,7 @@ func agree(h header.Parameters, recipient KeyAgreement) (z, apu, apv []byte, err
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("%w: missing or invalid %q", ErrMalformed, EphemeralPublicKey)
 	}
-	epk := jwk.Value(raw)
+	epk := jwk.Key(raw)
 	if jwk.IsPrivate(epk) {
 		return nil, nil, nil, fmt.Errorf("%w: %q contains private key material", ErrMalformed, EphemeralPublicKey)
 	}

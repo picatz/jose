@@ -39,7 +39,7 @@ var requiredMembers = map[string][]string{
 // string that needs no JSON escaping, which holds for every valid JWK.
 //
 // https://www.rfc-editor.org/rfc/rfc7638.html#section-3
-func Generate(value jwk.Value, h crypto.Hash) ([]byte, error) {
+func Generate(value jwk.Key, h crypto.Hash) ([]byte, error) {
 	kty, ok := value[jwk.KeyType].(string)
 	if !ok {
 		return nil, ErrInvalidKey
@@ -103,7 +103,7 @@ func needsEscape(s string) bool {
 
 // GenerateString returns the JWK Thumbprint for the given JWK following
 // the steps defined in RFC 7638 as a base64url string.
-func GenerateString(value jwk.Value, h crypto.Hash) (string, error) {
+func GenerateString(value jwk.Key, h crypto.Hash) (string, error) {
 	thumbprint, err := Generate(value, h)
 	if err != nil {
 		return "", err

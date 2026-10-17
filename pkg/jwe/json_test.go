@@ -30,10 +30,10 @@ func TestCookbookJSONDecrypt(t *testing.T) {
 		raw := loadCookbookRaw(t, file)
 		var vector struct {
 			Input struct {
-				Plaintext string    `json:"plaintext"`
-				Key       jwk.Value `json:"key"`
-				Alg       string    `json:"alg"`
-				Enc       string    `json:"enc"`
+				Plaintext string  `json:"plaintext"`
+				Key       jwk.Key `json:"key"`
+				Alg       string  `json:"alg"`
+				Enc       string  `json:"enc"`
 			} `json:"input"`
 			Output struct {
 				JSON     json.RawMessage `json:"json"`

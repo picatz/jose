@@ -110,7 +110,7 @@ type Proof struct {
 	// PublicKey is the proof key from the "jwk" header.
 	PublicKey crypto.PublicKey
 	// JWK is the public JWK from the "jwk" header.
-	JWK jwk.Value
+	JWK jwk.Key
 	// Thumbprint is the proof key's base64url SHA-256 JWK Thumbprint.
 	Thumbprint string
 
@@ -182,7 +182,7 @@ func (v *Verifier) Verify(ctx context.Context, proof string, req Request) (*Proo
 	if !ok {
 		return nil, invalidf("missing or invalid %q header", header.JSONWebKey)
 	}
-	value := jwk.Value(rawJWK)
+	value := jwk.Key(rawJWK)
 	if jwk.IsPrivate(value) {
 		return nil, invalidf("%q header contains private key material", header.JSONWebKey)
 	}

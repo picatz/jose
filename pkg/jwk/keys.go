@@ -34,14 +34,14 @@ const (
 //
 // https://www.rfc-editor.org/rfc/rfc7518.html#section-6.3.2
 const (
-	P  RSA = "p"
-	Q  RSA = "q"
-	DP RSA = "dp"
-	DQ RSA = "dq"
-	QI RSA = "qi"
+	P  = "p"
+	Q  = "q"
+	DP = "dp"
+	DQ = "dq"
+	QI = "qi"
 	// OtherPrimes ("oth") describes multi-prime RSA keys, which this package
 	// rejects.
-	OtherPrimes RSA = "oth"
+	OtherPrimes = "oth"
 )
 
 // ErrInvalidKey reports a JWK that is malformed, uses an unsupported key type
@@ -54,7 +54,7 @@ func invalid(format string, args ...any) error {
 
 // member returns the decoded base64url member name of v. Missing members,
 // non-string values and empty strings are errors.
-func member(v Value, name string) ([]byte, error) {
+func member(v Key, name string) ([]byte, error) {
 	raw, ok := v[name]
 	if !ok {
 		return nil, invalid("missing %q", name)
@@ -70,7 +70,7 @@ func member(v Value, name string) ([]byte, error) {
 	return b, nil
 }
 
-func stringMember(v Value, name string) (string, error) {
+func stringMember(v Key, name string) (string, error) {
 	raw, ok := v[name]
 	if !ok {
 		return "", invalid("missing %q", name)
@@ -124,7 +124,7 @@ func coordinate(b []byte, size int, name string) ([]byte, error) {
 }
 
 // ecPoint decodes and validates the uncompressed point of an EC JWK.
-func ecPoint(v Value) (elliptic.Curve, ecdh.Curve, []byte, error) {
+func ecPoint(v Key) (elliptic.Curve, ecdh.Curve, []byte, error) {
 	crv, err := stringMember(v, Curve)
 	if err != nil {
 		return nil, nil, nil, err
@@ -172,13 +172,13 @@ func ecdsaFromPoint(curve elliptic.Curve, point []byte) *ecdsa.PublicKey {
 const MaxRSAModulusBytes = 1024
 
 // rsaPublic decodes and bounds the public members of an RSA JWK.
-func rsaPublic(v Value) (*rsa.PublicKey, error) {
+func rsaPublic(v Key) (*rsa.PublicKey, error) {
 	n, err := member(v, N)
 	if err != nil {
 		return nil, err
 	}
-	if n[0] == 0 {
-		return nil, invalid("%q has a leading zero byte", N)
+	if len(n) == 0 || n[0] == 0 {
+		return nil, invalid("%q is empty or has a leading zero byte", N)
 	}
 	// Verification cost grows with the modulus, and a key from a token
 	// header is attacker-chosen, so absurd sizes are refused.
@@ -189,7 +189,7 @@ func rsaPublic(v Value) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(e) > 4 || e[0] == 0 {
+	if len(e) == 0 || len(e) > 4 || e[0] == 0 {
 		return nil, invalid("%q is not a minimal exponent of at most 32 bits", E)
 	}
 	exponent := new(big.Int).SetBytes(e)
@@ -212,7 +212,7 @@ func rsaPublic(v Value) (*rsa.PublicKey, error) {
 //
 // https://www.rfc-editor.org/rfc/rfc7518.html#section-6
 // https://www.rfc-editor.org/rfc/rfc8037.html#section-2
-func PublicKey(v Value) (crypto.PublicKey, error) {
+func PublicKey(v Key) (crypto.PublicKey, error) {
 	kty, err := stringMember(v, KeyType)
 	if err != nil {
 		return nil, err
@@ -271,7 +271,7 @@ func PublicKey(v Value) (crypto.PublicKey, error) {
 // https://www.rfc-editor.org/rfc/rfc7518.html#section-6.2.2
 // https://www.rfc-editor.org/rfc/rfc7518.html#section-6.3.2
 // https://www.rfc-editor.org/rfc/rfc8037.html#section-2
-func PrivateKey(v Value) (crypto.PrivateKey, error) {
+func PrivateKey(v Key) (crypto.PrivateKey, error) {
 	kty, err := stringMember(v, KeyType)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func encode(b []byte) string {
 // key may be *[ecdsa.PublicKey], *[rsa.PublicKey], [ed25519.PublicKey] or
 // *[ecdh.PublicKey] (X25519, P-256, P-384 or P-521), or a private key or
 // [crypto.Signer] whose Public method returns one of those.
-func PublicValue(key any) (Value, error) {
+func PublicValue(key any) (Key, error) {
 	if signer, ok := key.(crypto.Signer); ok {
 		key = signer.Public()
 	}
@@ -396,7 +396,7 @@ func PublicValue(key any) (Value, error) {
 		if key.N == nil || key.N.Sign() <= 0 || key.E < 3 {
 			return nil, invalid("RSA public key is empty")
 		}
-		return Value{
+		return Key{
 			KeyType: KeyTypeRSA,
 			N:       encode(key.N.Bytes()),
 			E:       encode(big.NewInt(int64(key.E)).Bytes()),
@@ -405,11 +405,11 @@ func PublicValue(key any) (Value, error) {
 		if len(key) != ed25519.PublicKeySize {
 			return nil, invalid("Ed25519 public key is %d bytes", len(key))
 		}
-		return Value{KeyType: KeyTypeOKP, Curve: CurveEd25519, X: encode(key)}, nil
+		return Key{KeyType: KeyTypeOKP, Curve: CurveEd25519, X: encode(key)}, nil
 	case *ecdh.PublicKey:
 		switch key.Curve() {
 		case ecdh.X25519():
-			return Value{KeyType: KeyTypeOKP, Curve: CurveX25519, X: encode(key.Bytes())}, nil
+			return Key{KeyType: KeyTypeOKP, Curve: CurveX25519, X: encode(key.Bytes())}, nil
 		case ecdh.P256():
 			return ecValue(CurveP256, key.Bytes()), nil
 		case ecdh.P384():
@@ -424,9 +424,9 @@ func PublicValue(key any) (Value, error) {
 }
 
 // ecValue builds an EC JWK from an uncompressed point.
-func ecValue(crv string, point []byte) Value {
+func ecValue(crv string, point []byte) Key {
 	size := (len(point) - 1) / 2
-	return Value{
+	return Key{
 		KeyType: KeyTypeEC,
 		Curve:   crv,
 		X:       encode(point[1 : 1+size]),
@@ -440,7 +440,7 @@ func ecValue(crv string, point []byte) Value {
 // must not carry any of these.
 //
 // https://www.rfc-editor.org/rfc/rfc7517.html#section-9.2
-func IsPrivate(v Value) bool {
+func IsPrivate(v Key) bool {
 	for _, name := range []string{D, P, Q, DP, DQ, QI, OtherPrimes, K} {
 		if _, ok := v[name]; ok {
 			return true

@@ -25,10 +25,10 @@ import (
 
 type cookbookEncryption struct {
 	Input struct {
-		Plaintext string    `json:"plaintext"`
-		Key       jwk.Value `json:"key"`
-		Alg       string    `json:"alg"`
-		Enc       string    `json:"enc"`
+		Plaintext string  `json:"plaintext"`
+		Key       jwk.Key `json:"key"`
+		Alg       string  `json:"alg"`
+		Enc       string  `json:"enc"`
 	} `json:"input"`
 	Output struct {
 		Compact string `json:"compact"`
@@ -49,10 +49,10 @@ func loadCookbook(t *testing.T, file string) cookbookEncryption {
 }
 
 // decryptionKey turns a cookbook JWK into the key type Decrypt takes.
-func decryptionKey(t *testing.T, v jwk.Value) any {
+func decryptionKey(t *testing.T, v jwk.Key) any {
 	t.Helper()
 	if v[jwk.KeyType] == jwk.KeyTypeOct {
-		k, err := jwk.HMACSecretKey(v)
+		k, err := base64url.Decode(v[jwk.K].(string))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func decryptionKey(t *testing.T, v jwk.Value) any {
 	return private
 }
 
-func encryptionKey(t *testing.T, v jwk.Value) any {
+func encryptionKey(t *testing.T, v jwk.Key) any {
 	t.Helper()
 	if v[jwk.KeyType] == jwk.KeyTypeOct {
 		return decryptionKey(t, v)
