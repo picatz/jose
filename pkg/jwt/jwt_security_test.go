@@ -1,6 +1,8 @@
 package jwt_test
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -9,36 +11,85 @@ import (
 	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
+	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
 	"github.com/picatz/jose/pkg/keyutil"
 )
 
+// rawToken assembles a compact token from arbitrary header, claims and
+// signature bytes, with no validation, so tests can build tokens that no
+// honest signer would produce.
+func rawToken(t testing.TB, h, claims any, signature []byte) string {
+	t.Helper()
+	enc := func(v any) string {
+		var b []byte
+		switch v := v.(type) {
+		case string:
+			b = []byte(v)
+		default:
+			var err error
+			if b, err = json.Marshal(v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err := base64.Encode(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	var sig string
+	if len(signature) > 0 {
+		var err error
+		if sig, err = base64.Encode(signature); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return enc(h) + "." + enc(claims) + "." + sig
+}
+
+// requireRefused fails unless Verify refused token with ErrInvalidToken and
+// the given sentinel, and returned no token.
+func requireRefused(t testing.TB, v *jwt.Verifier, token string, sentinel error) {
+	t.Helper()
+	got, err := v.Verify(context.Background(), token)
+	if err == nil {
+		t.Fatalf("Verify() accepted token, want %v", sentinel)
+	}
+	if got != nil {
+		t.Fatalf("Verify() returned token %v alongside error %v", got, err)
+	}
+	if !errors.Is(err, jwt.ErrInvalidToken) || !errors.Is(err, sentinel) {
+		t.Fatalf("Verify() error = %v, want %v and %v", err, jwt.ErrInvalidToken, sentinel)
+	}
+}
+
 // TestSecurityVulnerabilities tests various security vulnerabilities and attack vectors
 func TestSecurityVulnerabilities(t *testing.T) {
 	t.Run("Algorithm Confusion Attack", func(t *testing.T) {
-		// Test that RSA public keys cannot be used as HMAC secrets
+		// An RSA public key must not be usable as an HMAC secret.
 		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
-		// Create a token signed with RSA
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			rsaKeyPair.private,
 		)
 
-		// Try to verify with HMAC using the RSA public key (should fail)
-		err := token.Verify(
-			jwt.WithAllowedAlgorithms(jwa.HS256),
-			jwt.WithKey(rsaKeyPair.public),
+		// The verifier is told to expect HS256 and holds the RSA public key.
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public, jwa.HS256), token.String(), jwt.ErrFormat)
+
+		// An attacker's HS256 token, MACed with the PEM-ish bytes of the
+		// public key, is refused too: by default HMAC is not accepted at all.
+		forged := testToken(t,
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.HS256},
+			jwt.ClaimsSet{jwt.Subject: "admin"},
+			[]byte("0123456789abcdef0123456789abcdef"),
 		)
-		if !errors.Is(err, jwt.ErrInvalidToken) {
-			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
-		}
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), forged.String(), jwt.ErrFormat)
+
+		// Even if HS256 is listed, an RSA key is not an HMAC secret.
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public, jwa.HS256), forged.String(), jwt.ErrSignature)
 	})
 
 	t.Run("Weak HMAC Key", func(t *testing.T) {
@@ -46,219 +97,136 @@ func TestSecurityVulnerabilities(t *testing.T) {
 		weakKey := []byte("weak") // Only 4 bytes, much less than SHA256's 32 bytes
 
 		_, err := jwt.New(
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.HS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.HS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			weakKey,
 		)
 		if err == nil || !strings.Contains(err.Error(), "HMAC key must be at least 32 bytes") {
 			t.Fatalf("jwt.New() error = %v, want error containing %q", err, "HMAC key must be at least 32 bytes")
 		}
+
+		// A weak key held by the verifier cannot verify a token either.
+		strong := []byte("0123456789abcdef0123456789abcdef")
+		token := testToken(t,
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.HS256},
+			jwt.ClaimsSet{jwt.Subject: "test"}, strong)
+		requireRefused(t, sigOnlyVerifier(weakKey, jwa.HS256), token.String(), jwt.ErrSignature)
 	})
 
 	t.Run("None Algorithm Security", func(t *testing.T) {
-		// Test that "none" algorithm is properly restricted
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty signature for "none"
+		// The Verifier never accepts "none", whatever the signature
+		// segment holds and however the algorithm list is configured.
+		h := header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.None}
+		claims := jwt.ClaimsSet{jwt.Subject: "test"}
+		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+
+		for name, token := range map[string]string{
+			"empty signature":     rawToken(t, h, claims, nil),
+			"non-empty signature": rawToken(t, h, claims, []byte("not-empty")),
+		} {
+			t.Run(name, func(t *testing.T) {
+				requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), token, jwt.ErrFormat)
+				// Listing "none" explicitly changes nothing.
+				requireRefused(t, sigOnlyVerifier(rsaKeyPair.public, jwa.None), token, jwt.ErrFormat)
+				requireRefused(t, sigOnlyVerifier(rsaKeyPair.public, jwa.None, jwa.RS256), token, jwt.ErrFormat)
+			})
 		}
 
-		// Should fail without explicit allowance
-		err := token.Verify()
-		if !errors.Is(err, jwt.ErrInvalidToken) {
-			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
-		}
-
-		// Should still fail even with explicit allowance if signature is not empty
-		tokenWithSig := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte("not-empty"), // Invalid for "none"
-		}
-
-		err = tokenWithSig.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-		)
-		if !errors.Is(err, jwt.ErrInvalidToken) {
-			t.Fatalf("tokenWithSig.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		// Case variants of the name are not "none" to a lenient parser.
+		for _, alg := range []string{"None", "NONE", "nOnE"} {
+			token := rawToken(t, map[string]any{"typ": "JWT", "alg": alg}, claims, nil)
+			requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), token, jwt.ErrFormat)
 		}
 	})
 
 	t.Run("Missing Algorithm Header", func(t *testing.T) {
-		// Test that missing algorithm header is properly handled
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type: jwt.Type,
-				// Missing algorithm
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-		}
-
-		err := token.Verify(jwt.WithKey(testHMACSecretKey))
-		if err == nil || !strings.Contains(err.Error(), "parameter not found") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "parameter not found")
-		}
+		token := rawToken(t, map[string]any{"typ": "JWT"}, jwt.ClaimsSet{jwt.Subject: "test"}, []byte("sig"))
+		requireRefused(t, sigOnlyVerifier(testHMACSecretKey, jwa.HS256), token, jwt.ErrFormat)
 	})
 
 	t.Run("Empty Algorithm Header", func(t *testing.T) {
-		// Test that empty algorithm header is rejected
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: "", // Empty algorithm
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-		}
-
-		err := token.Verify(jwt.WithKey(testHMACSecretKey))
-		if !errors.Is(err, jwt.ErrInvalidToken) {
-			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
-		}
+		token := rawToken(t, map[string]any{"typ": "JWT", "alg": ""}, jwt.ClaimsSet{jwt.Subject: "test"}, []byte("sig"))
+		requireRefused(t, sigOnlyVerifier(testHMACSecretKey, jwa.HS256), token, jwt.ErrFormat)
 	})
 }
 
 func TestTimingAttackResistance(t *testing.T) {
-	t.Run("HMAC Key Iteration Timing", func(t *testing.T) {
-		// Test that HMAC verification doesn't leak timing information about which key succeeded
+	t.Run("HMAC Key Iteration", func(t *testing.T) {
+		// Several candidate keys: the one that matches verifies, and a set
+		// with no match is refused with a signature error.
 		key1 := make([]byte, 32)
 		key2 := make([]byte, 32)
 		key3 := make([]byte, 32)
-
-		// Fill with different patterns
 		for i := range key1 {
 			key1[i] = byte(i)
 			key2[i] = byte(i + 1)
 			key3[i] = byte(i + 2)
 		}
 
-		// Create token with key2
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.HS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.HS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			key2,
 		)
 
-		// Verify with multiple keys - should succeed
-		err := token.Verify(
-			jwt.WithAllowedAlgorithms(jwa.HS256),
-			jwt.WithKey(key1),
-			jwt.WithKey(key2), // This one will match
-			jwt.WithKey(key3),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+		verifier := sigOnlyVerifier(nil, jwa.HS256)
+		verifier.Keys = jwt.Keys{{Public: key1}, {Public: key2}, {Public: key3}}
+		if err := verifyToken(verifier, token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 
-		// Verify with wrong keys - should fail
-		err = token.Verify(
-			jwt.WithAllowedAlgorithms(jwa.HS256),
-			jwt.WithKey(key1),
-			jwt.WithKey(key3),
-		)
-		if err == nil {
-			t.Fatal("token.Verify() error = nil, want non-nil")
-		}
+		verifier.Keys = jwt.Keys{{Public: key1}, {Public: key3}}
+		requireRefused(t, verifier, token.String(), jwt.ErrSignature)
 	})
 }
 
 func TestClockSkewTolerance(t *testing.T) {
-	t.Run("Expiration with Clock Skew", func(t *testing.T) {
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	now := time.Now()
 
-		// Create token that expired 30 seconds ago
-		expiredTime := time.Now().Add(-30 * time.Second)
+	t.Run("Expiration with Leeway", func(t *testing.T) {
+		// A token that expired 30 seconds ago.
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject:        "test",
-				jwt.ExpirationTime: expiredTime.Unix(),
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test", jwt.ExpirationTime: now.Add(-30 * time.Second).Unix()},
 			rsaKeyPair.private,
 		)
 
-		// Should fail without clock skew tolerance
-		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		if err == nil || !strings.Contains(err.Error(), "token is expired") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "token is expired")
+		verifier := sigOnlyVerifier(rsaKeyPair.public)
+		verifier.Now = func() time.Time { return now }
+
+		// Refused when the leeway is smaller than the age.
+		verifier.Leeway = 10 * time.Second
+		requireRefused(t, verifier, token.String(), jwt.ErrExpired)
+
+		// Accepted with sufficient leeway.
+		verifier.Leeway = time.Minute
+		if err := verifyToken(verifier, token.String()); err != nil {
+			t.Fatalf("Verify() with 1m leeway error = %v", err)
 		}
 
-		// Should succeed with sufficient clock skew tolerance
-		err = token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithClockSkewTolerance(1*time.Minute),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
-		}
-
-		// Should still fail with insufficient clock skew tolerance
-		err = token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithClockSkewTolerance(10*time.Second),
-		)
-		if err == nil || !strings.Contains(err.Error(), "token is expired") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "token is expired")
-		}
+		// The zero value is the 30s default, which has just run out.
+		verifier.Leeway = 0
+		requireRefused(t, verifier, token.String(), jwt.ErrExpired)
 	})
 
-	t.Run("NotBefore with Clock Skew", func(t *testing.T) {
-		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
-
-		// Create token that's not valid yet (30 seconds in future)
-		notBeforeTime := time.Now().Add(30 * time.Second)
+	t.Run("NotBefore with Leeway", func(t *testing.T) {
+		// A token that is not valid for another 45 seconds.
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject:   "test",
-				jwt.NotBefore: notBeforeTime.Unix(),
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test", jwt.NotBefore: now.Add(45 * time.Second).Unix()},
 			rsaKeyPair.private,
 		)
 
-		// Should fail without clock skew tolerance
-		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		if err == nil || !strings.Contains(err.Error(), "unable to be used before") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "unable to be used before")
-		}
+		verifier := sigOnlyVerifier(rsaKeyPair.public)
+		verifier.Now = func() time.Time { return now }
 
-		// Should succeed with sufficient clock skew tolerance
-		err = token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithClockSkewTolerance(1*time.Minute),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+		verifier.Leeway = 10 * time.Second
+		requireRefused(t, verifier, token.String(), jwt.ErrNotYetValid)
+
+		verifier.Leeway = time.Minute
+		if err := verifyToken(verifier, token.String()); err != nil {
+			t.Fatalf("Verify() with 1m leeway error = %v", err)
 		}
 	})
 }
@@ -268,71 +236,74 @@ func TestInvalidSignatures(t *testing.T) {
 		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			rsaKeyPair.private,
 		)
 
-		// Tamper with signature
-		if len(token.Signature) > 0 {
-			token.Signature[0] ^= 0xFF // Flip all bits in first byte
+		// Flip all bits in the first byte of the signature.
+		sig := append([]byte(nil), token.Signature...)
+		sig[0] ^= 0xFF
+		parts := strings.Split(token.String(), ".")
+		sigB64, err := base64.Encode(sig)
+		if err != nil {
+			t.Fatal(err)
 		}
+		tampered := parts[0] + "." + parts[1] + "." + sigB64
 
-		err := token.Verify(jwt.WithKey(rsaKeyPair.public))
-		if !errors.Is(err, jwt.ErrInvalidToken) {
-			t.Fatalf("token.Verify() error = %v, want %v", err, jwt.ErrInvalidToken)
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), tampered, jwt.ErrSignature)
+		// The untouched token still verifies.
+		if err := verifyToken(sigOnlyVerifier(rsaKeyPair.public), token.String()); err != nil {
+			t.Fatalf("Verify() of the original error = %v", err)
 		}
+	})
+
+	t.Run("Tampered Claims", func(t *testing.T) {
+		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+
+		token := testToken(t,
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
+			rsaKeyPair.private,
+		)
+
+		parts := strings.Split(token.String(), ".")
+		claims, err := base64.Encode([]byte(`{"sub":"admin"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), parts[0]+"."+claims+"."+parts[2], jwt.ErrSignature)
 	})
 
 	t.Run("Wrong Key Type for Algorithm", func(t *testing.T) {
 		rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 		ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
 
-		// Create RSA token
 		rsaToken := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			rsaKeyPair.private,
 		)
 
-		// Try to verify with ECDSA key (wrong type)
-		err := rsaToken.Verify(jwt.WithKey(ecdsaKeyPair.public))
-		if err == nil || !strings.Contains(err.Error(), "failed to verify RSA signature using any of the allowed keys") {
-			t.Fatalf("rsaToken.Verify() error = %v, want error containing %q", err, "failed to verify RSA signature using any of the allowed keys")
-		}
+		// An ECDSA key cannot verify an RSA signature.
+		requireRefused(t, sigOnlyVerifier(ecdsaKeyPair.public), rsaToken.String(), jwt.ErrSignature)
 	})
 
 	t.Run("ECDSA Signature Length Validation", func(t *testing.T) {
 		ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
 
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.ES256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.ES256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
 			ecdsaKeyPair.private,
 		)
 
-		// Corrupt signature length
-		token.Signature = []byte("invalid-length-signature")
-
-		err := token.Verify(jwt.WithKey(ecdsaKeyPair.public))
-		if err == nil || !strings.Contains(err.Error(), "failed to verify ECDSA signature") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "failed to verify ECDSA signature")
+		parts := strings.Split(token.String(), ".")
+		sig, err := base64.Encode([]byte("invalid-length-signature"))
+		if err != nil {
+			t.Fatal(err)
 		}
+		requireRefused(t, sigOnlyVerifier(ecdsaKeyPair.public), parts[0]+"."+parts[1]+"."+sig, jwt.ErrSignature)
 	})
 }
 
@@ -360,13 +331,8 @@ func TestKeyValidation(t *testing.T) {
 				}
 
 				_, err := jwt.New(
-					header.Parameters{
-						header.Type:      jwt.Type,
-						header.Algorithm: test.algorithm,
-					},
-					jwt.ClaimsSet{
-						jwt.Subject: "test",
-					},
+					header.Parameters{header.Type: jwt.Type, header.Algorithm: test.algorithm},
+					jwt.ClaimsSet{jwt.Subject: "test"},
 					key,
 				)
 
@@ -374,39 +340,28 @@ func TestKeyValidation(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "HMAC key must be at least") {
 						t.Fatalf("jwt.New() error = %v, want error containing %q", err, "HMAC key must be at least")
 					}
-				} else {
-					if err != nil {
-						t.Fatalf("jwt.New() error = %v", err)
-					}
+				} else if err != nil {
+					t.Fatalf("jwt.New() error = %v", err)
 				}
 			})
 		}
 	})
 
 	t.Run("EdDSA Key Size Validation", func(t *testing.T) {
-		// Test with invalid key sizes
-		invalidKey := make([]byte, 16) // Too short
-
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.EdDSA,
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: make([]byte, 64), // Valid signature length
-		}
-
-		// This should be caught at the verification level
-		err := token.VerifyEdDSASignature(invalidKey)
-		if err == nil || !strings.Contains(err.Error(), "invalid Ed25519 public key size") {
-			t.Fatalf("token.VerifyEdDSASignature() error = %v, want error containing %q", err, "invalid Ed25519 public key size")
-		}
+		// A 16-byte "public key" never verifies an EdDSA token.
+		eddsaKeyPair := testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+		token := testToken(t,
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.EdDSA},
+			jwt.ClaimsSet{jwt.Subject: "test"},
+			eddsaKeyPair.private,
+		)
+		requireRefused(t, sigOnlyVerifier(make([]byte, 16), jwa.EdDSA), token.String(), jwt.ErrSignature)
 	})
 }
 
 func TestParsingVulnerabilities(t *testing.T) {
+	verifier := sigOnlyVerifier(testHMACSecretKey, jwa.HS256)
+
 	t.Run("Malformed JWT Structure", func(t *testing.T) {
 		malformedTokens := []string{
 			"",                   // Empty
@@ -421,216 +376,103 @@ func TestParsingVulnerabilities(t *testing.T) {
 
 		for _, malformed := range malformedTokens {
 			t.Run("malformed_"+malformed, func(t *testing.T) {
-				_, err := jwt.ParseString(malformed)
-				if err == nil {
-					t.Fatal("jwt.ParseString() error = nil, want non-nil")
+				if _, err := jwt.Parse(malformed); err == nil {
+					t.Fatal("jwt.Parse() error = nil, want non-nil")
 				}
+				requireRefused(t, verifier, malformed, jwt.ErrFormat)
 			})
 		}
 	})
 
 	t.Run("Invalid JSON in Header", func(t *testing.T) {
-		// Create token with invalid JSON in header
-		invalidHeader := "not-json"
-		validClaims := `{"sub":"test"}`
-		validSig := "signature"
+		malformedToken := rawToken(t, "not-json", `{"sub":"test"}`, []byte("signature"))
 
-		// Base64 encode the parts
-		headerB64, err := base64.Encode([]byte(invalidHeader))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(headerB64) == 0 {
-			t.Fatal("headerB64 is empty")
-		}
-		claimsB64, err := base64.Encode([]byte(validClaims))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(claimsB64) == 0 {
-			t.Fatal("claimsB64 is empty")
-		}
-		sigB64, err := base64.Encode([]byte(validSig))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(sigB64) == 0 {
-			t.Fatal("sigB64 is empty")
-		}
-
-		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
-
-		_, err = jwt.ParseString(malformedToken)
+		_, err := jwt.Parse(malformedToken)
 		if err == nil || !strings.Contains(err.Error(), "failed to decode JOSE header JSON") {
-			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "failed to decode JOSE header JSON")
+			t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, "failed to decode JOSE header JSON")
 		}
+		requireRefused(t, verifier, malformedToken, jwt.ErrFormat)
 	})
 
 	t.Run("Invalid JSON in Claims", func(t *testing.T) {
-		// Create token with invalid JSON in claims
-		validHeader := `{"alg":"HS256","typ":"JWT"}`
-		invalidClaims := "not-json"
-		validSig := "signature"
+		malformedToken := rawToken(t, `{"alg":"HS256","typ":"JWT"}`, "not-json", []byte("signature"))
 
-		// Base64 encode the parts
-		headerB64, err := base64.Encode([]byte(validHeader))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(headerB64) == 0 {
-			t.Fatal("headerB64 is empty")
-		}
-		claimsB64, err := base64.Encode([]byte(invalidClaims))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(claimsB64) == 0 {
-			t.Fatal("claimsB64 is empty")
-		}
-		sigB64, err := base64.Encode([]byte(validSig))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(sigB64) == 0 {
-			t.Fatal("sigB64 is empty")
-		}
-
-		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
-
-		_, err = jwt.ParseString(malformedToken)
+		_, err := jwt.Parse(malformedToken)
 		if err == nil || !strings.Contains(err.Error(), "failed to decode claims JSON") {
-			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "failed to decode claims JSON")
+			t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, "failed to decode claims JSON")
 		}
+		requireRefused(t, verifier, malformedToken, jwt.ErrFormat)
 	})
 
 	t.Run("Invalid Time Claims", func(t *testing.T) {
-		// Test with string values for time claims (should be numeric)
-		validHeader := `{"alg":"HS256","typ":"JWT"}`
-		invalidClaims := `{"exp":"not-a-number","iat":"also-not-a-number"}`
-		validSig := "signature"
+		// String values for time claims, which should be numeric.
+		malformedToken := rawToken(t, `{"alg":"HS256","typ":"JWT"}`, `{"exp":"not-a-number","iat":"also-not-a-number"}`, []byte("signature"))
 
-		headerB64, err := base64.Encode([]byte(validHeader))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(headerB64) == 0 {
-			t.Fatal("headerB64 is empty")
-		}
-		claimsB64, err := base64.Encode([]byte(invalidClaims))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(claimsB64) == 0 {
-			t.Fatal("claimsB64 is empty")
-		}
-		sigB64, err := base64.Encode([]byte(validSig))
-		if err != nil {
-			t.Fatalf("base64.Encode() error = %v", err)
-		}
-		if len(sigB64) == 0 {
-			t.Fatal("sigB64 is empty")
-		}
-
-		malformedToken := headerB64 + "." + claimsB64 + "." + sigB64
-
-		_, err = jwt.ParseString(malformedToken)
+		_, err := jwt.Parse(malformedToken)
 		if err == nil || !strings.Contains(err.Error(), "invalid type") {
-			t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, "invalid type")
+			t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, "invalid type")
 		}
+		requireRefused(t, verifier, malformedToken, jwt.ErrClaims)
 	})
 }
 
 func TestAudienceValidation(t *testing.T) {
 	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
+	audienceVerifier := func(audience string) *jwt.Verifier {
+		v := sigOnlyVerifier(rsaKeyPair.public)
+		v.AnyAudience = false
+		v.Audience = audience
+		return v
+	}
+
 	t.Run("String Audience", func(t *testing.T) {
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject:  "test",
-				jwt.Audience: "expected-audience",
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test", jwt.Audience: "expected-audience"},
 			rsaKeyPair.private,
 		)
 
-		// Should succeed with correct audience
-		err := token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithAllowedAudiences("expected-audience"),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+		if err := verifyToken(audienceVerifier("expected-audience"), token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
-
-		// Should fail with wrong audience
-		err = token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithAllowedAudiences("wrong-audience"),
-		)
-		if err == nil || !strings.Contains(err.Error(), "not allowed") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "not allowed")
-		}
+		requireRefused(t, audienceVerifier("wrong-audience"), token.String(), jwt.ErrClaims)
 	})
 
 	t.Run("Array Audience", func(t *testing.T) {
 		token := testToken(t,
-			header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			jwt.ClaimsSet{
-				jwt.Subject:  "test",
-				jwt.Audience: []string{"aud1", "aud2", "aud3"},
-			},
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test", jwt.Audience: []string{"aud1", "aud2", "aud3"}},
 			rsaKeyPair.private,
 		)
 
-		// Should succeed if any audience matches
-		err := token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithAllowedAudiences("aud2", "aud4"),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+		// Accepted when this verifier is one of the audiences.
+		if err := verifyToken(audienceVerifier("aud2"), token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
+		requireRefused(t, audienceVerifier("aud4"), token.String(), jwt.ErrClaims)
+	})
 
-		// Should fail if no audience matches
-		err = token.Verify(
-			jwt.WithKey(rsaKeyPair.public),
-			jwt.WithAllowedAudiences("aud4", "aud5"),
+	t.Run("Missing Audience", func(t *testing.T) {
+		token := testToken(t,
+			header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+			jwt.ClaimsSet{jwt.Subject: "test"},
+			rsaKeyPair.private,
 		)
-		if err == nil || !strings.Contains(err.Error(), "none of the requested audiences") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "none of the requested audiences")
-		}
+		requireRefused(t, audienceVerifier("expected-audience"), token.String(), jwt.ErrClaims)
 	})
 
 	t.Run("Invalid Audience Type", func(t *testing.T) {
-		// Create a token with "none" algorithm to bypass signature verification
-		// and manually set invalid audience type
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject:  "test",
-				jwt.Audience: 123.0, // Invalid type (float64 - what JSON unmarshaling would produce)
-			},
-			Signature: []byte{}, // Empty signature for "none"
-		}
-
-		// Should fail due to invalid audience type
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithAllowedAudiences("any"),
+		// A validly signed token whose "aud" is neither a string nor an
+		// array of strings. Mint it with jws, since jwt.New refuses it.
+		token := sign(t,
+			jws.Header{header.Algorithm: jwa.RS256, header.Type: jwt.Type},
+			map[string]any{"sub": "test", "aud": 123},
+			rsaKeyPair.private,
 		)
-		if err == nil || !strings.Contains(err.Error(), "invalid audience type") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "invalid audience type")
-		}
+		requireRefused(t, audienceVerifier("any"), token, jwt.ErrClaims)
+		// Not even a verifier that skips the audience check accepts it.
+		requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), token, jwt.ErrClaims)
 	})
 }
 
@@ -638,12 +480,14 @@ func TestAudienceValidation(t *testing.T) {
 // two verifiers cannot read different values from the same token.
 func TestDuplicateNamesRefused(t *testing.T) {
 	encode := func(s string) string { out, _ := base64.Encode([]byte(s)); return out }
+	verifier := sigOnlyVerifier(testHMACSecretKey, jwa.HS256)
 	for name, token := range map[string]string{
 		"header": encode(`{"alg":"none","alg":"HS256","typ":"JWT"}`) + "." + encode(`{"sub":"alice"}`) + ".c2ln",
 		"claims": encode(`{"alg":"HS256","typ":"JWT"}`) + "." + encode(`{"sub":"alice","sub":"admin"}`) + ".c2ln",
 	} {
-		if _, err := jwt.ParseString(token); err == nil {
-			t.Errorf("%s: ParseString accepted duplicate names", name)
+		if _, err := jwt.Parse(token); err == nil {
+			t.Errorf("%s: Parse accepted duplicate names", name)
 		}
+		requireRefused(t, verifier, token, jwt.ErrFormat)
 	}
 }

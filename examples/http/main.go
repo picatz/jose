@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -27,8 +28,11 @@ func main() {
 			header.Algorithm: jwa.ES256,
 		},
 		jwt.ClaimsSet{
-			"sub":  "1234567890",
-			"name": "John Doe",
+			jwt.Issuer:         "https://issuer.example",
+			jwt.Audience:       "https://api.example",
+			jwt.ExpirationTime: time.Now().Add(time.Hour),
+			"sub":              "1234567890",
+			"name":             "John Doe",
 		},
 		private,
 	)
@@ -37,6 +41,12 @@ func main() {
 	}
 
 	fmt.Printf("Starting Example Server\n")
+	verifier := &jwt.Verifier{
+		Keys:     jwt.Keys{{Public: &private.PublicKey}},
+		Issuer:   "https://issuer.example",
+		Audience: "https://api.example",
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +56,7 @@ func main() {
 			return
 		}
 
-		token, err = jwt.ParseAndVerify(bearerToken, jwt.WithKey(&private.PublicKey))
+		token, err = verifier.Verify(r.Context(), bearerToken)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return

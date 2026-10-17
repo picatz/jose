@@ -1,6 +1,7 @@
 package jwtchain_test
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
@@ -511,13 +512,15 @@ func TestRootFromPackageJWT(t *testing.T) {
 	c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Scope: []string{"read"}, Holder: f.b.Public()})
 	policy := f.policy()
 	policy.Root = func(root string) (jwt.ClaimsSet, error) {
-		token, err := jwt.ParseAndVerify(root,
-			jwt.WithKey(f.issuer.Public().(ed25519.PublicKey)),
-			jwt.WithAllowedAlgorithms(jwa.EdDSA),
-			jwt.WithAllowedIssuers("https://issuer.example"),
-			jwt.WithAllowedAudiences("https://api.example"),
-			jwt.WithClock(clock),
-		)
+		verifier := &jwt.Verifier{
+			Keys:       jwt.Keys{{Public: f.issuer.Public().(ed25519.PublicKey)}},
+			Algorithms: []jwa.Algorithm{jwa.EdDSA},
+			Types:      []string{"at+jwt"},
+			Issuer:     "https://issuer.example",
+			Audience:   "https://api.example",
+			Now:        clock,
+		}
+		token, err := verifier.Verify(context.Background(), root)
 		if err != nil {
 			return nil, err
 		}

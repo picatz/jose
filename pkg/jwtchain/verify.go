@@ -60,7 +60,8 @@ type Policy struct {
 	MaxLinks int
 	MaxSize  int
 
-	// Leeway is the clock skew tolerated for "exp" and "nbf"; zero means
+	// Leeway is the clock skew tolerated for "exp", "nbf" and a link's
+	// "iat", which may not be in the future; zero means
 	// [DefaultLeeway].
 	Leeway time.Duration
 	// Now is the clock; nil means [time.Now].
@@ -260,6 +261,11 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 	}
 	if !s.expiry.IsZero() && !current.Add(-leeway).Before(s.expiry) {
 		return nil, fmt.Errorf("%w: expired at %s", ErrVerification, s.expiry.UTC().Format(time.RFC3339))
+	}
+	// A link issued in the future was signed on a wrong clock or backdated
+	// for later use; either way it is not yet the holder's to present.
+	if current.Add(leeway).Before(s.issuedAt) {
+		return nil, fmt.Errorf("%w: a link was issued in the future, at %s", ErrVerification, s.issuedAt.UTC().Format(time.RFC3339))
 	}
 	if s.confirmation == nil && !p.AllowBearer {
 		return nil, fmt.Errorf("%w: its last token binds no holder (\"cnf\"), and AllowBearer is not set", ErrBearer)

@@ -9,6 +9,7 @@ import (
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
+	"github.com/picatz/jose/pkg/keyutil"
 )
 
 func must[T any](value T, err error) T {
@@ -73,10 +74,10 @@ func TestRFC7519Compliance(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				_, err := jwt.ParseString(tt.input)
+				_, err := jwt.Parse(tt.input)
 				if tt.shouldError {
 					if err == nil {
-						t.Fatal("jwt.ParseString() error = nil, want non-nil")
+						t.Fatal("jwt.Parse() error = nil, want non-nil")
 					}
 					if tt.errorCheck != nil {
 						if !tt.errorCheck(err) {
@@ -85,7 +86,7 @@ func TestRFC7519Compliance(t *testing.T) {
 					}
 				} else {
 					if err != nil {
-						t.Fatalf("jwt.ParseString() error = %v", err)
+						t.Fatalf("jwt.Parse() error = %v", err)
 					}
 				}
 			})
@@ -126,9 +127,9 @@ func TestRFC7519Compliance(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				jwtString := tt.header + "." + tt.payload + "." + tt.signature
-				_, err := jwt.ParseString(jwtString)
+				_, err := jwt.Parse(jwtString)
 				if err == nil || !strings.Contains(err.Error(), tt.expectedErr) {
-					t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, tt.expectedErr)
+					t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, tt.expectedErr)
 				}
 			})
 		}
@@ -170,9 +171,9 @@ func TestRFC7519Compliance(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				jwtString := tt.header + "." + tt.payload + "."
-				_, err := jwt.ParseString(jwtString)
+				_, err := jwt.Parse(jwtString)
 				if err == nil || !strings.Contains(err.Error(), tt.expectedErr) {
-					t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, tt.expectedErr)
+					t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, tt.expectedErr)
 				}
 			})
 		}
@@ -223,14 +224,14 @@ func TestRFC7519Compliance(t *testing.T) {
 				}
 				jwtString := header + "." + payload + "."
 
-				_, err = jwt.ParseString(jwtString)
+				_, err = jwt.Parse(jwtString)
 				if test.expectedErr != "" {
 					if err == nil || !strings.Contains(err.Error(), test.expectedErr) {
-						t.Fatalf("jwt.ParseString() error = %v, want error containing %q", err, test.expectedErr)
+						t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, test.expectedErr)
 					}
 				} else {
 					if err != nil {
-						t.Fatalf("jwt.ParseString() error = %v", err)
+						t.Fatalf("jwt.Parse() error = %v", err)
 					}
 				}
 			})
@@ -287,33 +288,17 @@ func TestSecurityEdgeCases(t *testing.T) {
 				}
 				jwtString := header + "." + payload + "."
 
-				token, parseErr := jwt.ParseString(jwtString)
-				if parseErr != nil && tt.shouldError && tt.errorCheck != nil {
-					tt.errorCheck(t, parseErr)
-					return
-				}
-				if parseErr != nil {
-					t.Fatalf("jwt.ParseString() error = %v", parseErr)
-				}
+				// Whatever Parse makes of the header, a Verifier refuses it:
+				// there is no usable algorithm, or it is "none".
+				requireRefused(t, sigOnlyVerifier(testHMACSecretKey, jwa.HS256, jwa.None), jwtString, jwt.ErrFormat)
 
-				// Test verification
-				if tt.name == "Case sensitivity in algorithm" {
-					// For "none" algorithm test, allow insecure none algorithm
-					err = token.Verify(jwt.WithAllowInsecureNoneAlgorithm(true), jwt.WithAllowedAlgorithms(jwa.None))
-				} else {
-					err = token.Verify(jwt.WithKey(testHMACSecretKey))
-				}
-				if tt.shouldError {
-					if err == nil {
-						t.Fatal("token.Verify() error = nil, want non-nil")
-					}
-					if tt.errorCheck != nil {
-						tt.errorCheck(t, err)
-					}
-				} else {
-					if err != nil {
-						t.Fatalf("token.Verify() error = %v", err)
-					}
+				_, parseErr := jwt.Parse(jwtString)
+				// Parse only decodes, so it may well accept what the Verifier
+				// refuses; when it does refuse, it must say so with ErrInvalidToken.
+				if parseErr != nil && tt.shouldError {
+					tt.errorCheck(t, parseErr)
+				} else if parseErr != nil {
+					t.Fatalf("jwt.Parse() error = %v", parseErr)
 				}
 			})
 		}
@@ -336,18 +321,20 @@ func TestSecurityEdgeCases(t *testing.T) {
 		)
 
 		// Parse the large token
-		parsed, err := jwt.ParseString(token.String())
+		parsed, err := jwt.Parse(token.String())
 		if err != nil {
-			t.Fatalf("jwt.ParseString() error = %v", err)
+			t.Fatalf("jwt.Parse() error = %v", err)
 		}
 		if parsed == nil {
 			t.Fatal("parsed = nil, want non-nil")
 		}
 
-		// Verify it
-		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		if err != nil {
-			t.Fatalf("parsed.Verify() error = %v", err)
+		// The default size bound refuses it; a raised bound accepts it.
+		verifier := sigOnlyVerifier(testHMACSecretKey, jwa.HS256)
+		requireRefused(t, verifier, token.String(), jwt.ErrFormat)
+		verifier.MaxSize = 1 << 20
+		if err := verifyToken(verifier, token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 	})
 
@@ -370,9 +357,9 @@ func TestSecurityEdgeCases(t *testing.T) {
 		)
 
 		// Parse and verify
-		parsed, err := jwt.ParseString(token.String())
+		parsed, err := jwt.Parse(token.String())
 		if err != nil {
-			t.Fatalf("jwt.ParseString() error = %v", err)
+			t.Fatalf("jwt.Parse() error = %v", err)
 		}
 		if parsed.Claims[jwt.Subject] != claims[jwt.Subject] {
 			t.Fatalf("parsed.Claims[jwt.Subject] = %v, want %v", parsed.Claims[jwt.Subject], claims[jwt.Subject])
@@ -381,9 +368,8 @@ func TestSecurityEdgeCases(t *testing.T) {
 			t.Fatalf("parsed.Claims[jwt.Issuer] = %v, want %v", parsed.Claims[jwt.Issuer], claims[jwt.Issuer])
 		}
 
-		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		if err != nil {
-			t.Fatalf("parsed.Verify() error = %v", err)
+		if err := verifyToken(sigOnlyVerifier(testHMACSecretKey, jwa.HS256), token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 	})
 
@@ -404,9 +390,9 @@ func TestSecurityEdgeCases(t *testing.T) {
 			testHMACSecretKey,
 		)
 
-		parsed, err := jwt.ParseString(token.String())
+		parsed, err := jwt.Parse(token.String())
 		if err != nil {
-			t.Fatalf("jwt.ParseString() error = %v", err)
+			t.Fatalf("jwt.Parse() error = %v", err)
 		}
 		if parsed.Claims[jwt.Subject] != "" {
 			t.Fatalf("parsed.Claims[jwt.Subject] = %q, want %q", parsed.Claims[jwt.Subject], "")
@@ -415,92 +401,33 @@ func TestSecurityEdgeCases(t *testing.T) {
 			t.Fatalf("parsed.Claims[jwt.Issuer] = %q, want %q", parsed.Claims[jwt.Issuer], "   ")
 		}
 
-		err = parsed.Verify(jwt.WithKey(testHMACSecretKey))
-		if err != nil {
-			t.Fatalf("parsed.Verify() error = %v", err)
+		if err := verifyToken(sigOnlyVerifier(testHMACSecretKey, jwa.HS256), token.String()); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 	})
 }
 
-// TestNoneAlgorithmCompliance tests RFC compliance for "none" algorithm
+// TestNoneAlgorithmCompliance tests that the "none" algorithm is refused.
+// The Verifier has no switch to allow it, so every shape of unsecured JWT
+// (RFC 7519 §6) is refused, with or without "none" in the algorithm list.
 func TestNoneAlgorithmCompliance(t *testing.T) {
-	t.Run("None Algorithm Strict Validation", func(t *testing.T) {
-		tests := []struct {
-			name        string
-			header      header.Parameters
-			signature   []byte
-			allowNone   bool
-			shouldError bool
-			errorCheck  func(error) bool
-		}{
-			{
-				name: "None with empty signature - should work when allowed",
-				header: header.Parameters{
-					header.Type:      jwt.Type,
-					header.Algorithm: jwa.None,
-				},
-				signature:   []byte{},
-				allowNone:   true,
-				shouldError: false,
-			},
-			{
-				name: "None with non-empty signature - should fail",
-				header: header.Parameters{
-					header.Type:      jwt.Type,
-					header.Algorithm: jwa.None,
-				},
-				signature:   []byte("signature"),
-				allowNone:   true,
-				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "signature must be empty") },
-			},
-			{
-				name: "None without explicit allowance - should fail",
-				header: header.Parameters{
-					header.Type:      jwt.Type,
-					header.Algorithm: jwa.None,
-				},
-				signature:   []byte{},
-				allowNone:   false,
-				shouldError: true,
-				errorCheck:  func(err error) bool { return strings.Contains(err.Error(), "is not allowed") },
-			},
-		}
+	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	tests := []struct {
+		name      string
+		signature []byte
+	}{
+		{"None with empty signature", nil},
+		{"None with non-empty signature", []byte("signature")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token := rawToken(t,
+				header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.None},
+				jwt.ClaimsSet{jwt.Subject: "test"}, tt.signature)
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				token := &jwt.Token{
-					Header: tt.header,
-					Claims: jwt.ClaimsSet{
-						jwt.Subject: "test",
-					},
-					Signature: tt.signature,
-				}
-
-				var opts []jwt.VerifyOption
-				if tt.allowNone {
-					opts = append(opts,
-						jwt.WithAllowInsecureNoneAlgorithm(true),
-						jwt.WithAllowedAlgorithms(jwa.None),
-					)
-				}
-
-				err := token.Verify(opts...)
-				if tt.shouldError {
-					if err == nil {
-						t.Fatal("token.Verify() error = nil, want non-nil")
-					}
-					if tt.errorCheck != nil {
-						if !tt.errorCheck(err) {
-							t.Fatalf("error check failed for: %v", err)
-						}
-					}
-				} else {
-					if err != nil {
-						t.Fatalf("token.Verify() error = %v", err)
-					}
-				}
-			})
-		}
-	})
+			requireRefused(t, sigOnlyVerifier(rsaKeyPair.public), token, jwt.ErrFormat)
+			requireRefused(t, sigOnlyVerifier(rsaKeyPair.public, jwa.None), token, jwt.ErrFormat)
+			requireRefused(t, sigOnlyVerifier(nil, jwa.None), token, jwt.ErrFormat)
+		})
+	}
 }

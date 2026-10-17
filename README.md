@@ -42,6 +42,9 @@ token, err := jwt.New(
 		header.Algorithm: jwa.ES256,
 	},
 	jwt.ClaimsSet{
+		jwt.Issuer:     "https://issuer.example",
+		jwt.Audience:   "https://api.example",
+		jwt.ExpirationTime: time.Now().Add(time.Hour),
 		"sub":  "1234567890",
 		"name": "John Doe",
 	},
@@ -49,6 +52,12 @@ token, err := jwt.New(
 )
 if err != nil {
 	panic(err)
+}
+
+verifier := &jwt.Verifier{
+	Keys:     jwt.Keys{{Public: &private.PublicKey}},
+	Issuer:   "https://issuer.example",
+	Audience: "https://api.example",
 }
 
 mux := http.NewServeMux()
@@ -60,7 +69,7 @@ mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err = jwt.ParseAndVerify(bearerToken, jwt.WithKey(&private.PublicKey))
+	token, err = verifier.Verify(r.Context(), bearerToken)
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		return

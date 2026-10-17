@@ -1,265 +1,126 @@
 package jwt_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
+	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
+	"github.com/picatz/jose/pkg/keyutil"
 )
 
-// TestCriticalHeaderValidation tests RFC 7515 section 4.1.11 critical header validation
+// TestCriticalHeaderValidation tests RFC 7515 section 4.1.11 critical header
+// validation through the Verifier: a "crit" it does not list in
+// [jwt.Verifier.Critical], or that is malformed, is refused before any
+// signature is checked.
 func TestCriticalHeaderValidation(t *testing.T) {
-	t.Run("No Critical Header", func(t *testing.T) {
-		// Token without "crit" header should pass validation
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
+	keys := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+	claims := jwt.ClaimsSet{jwt.Subject: "test"}
 
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+	// signed returns a validly signed token with extra header parameters.
+	signed := func(t *testing.T, extra jws.Header) string {
+		t.Helper()
+		h := jws.Header{header.Type: jwt.Type, header.Algorithm: jwa.ES256}
+		for name, value := range extra {
+			h[name] = value
+		}
+		return sign(t, h, claims, keys.private)
+	}
+	// forged is the same shape with a signature nobody checked: if the
+	// refusal is ErrFormat, it came before signature verification.
+	forged := func(t *testing.T, extra map[string]any) string {
+		t.Helper()
+		h := map[string]any{"typ": "JWT", "alg": "ES256"}
+		for name, value := range extra {
+			h[name] = value
+		}
+		return rawToken(t, h, claims, []byte("signature"))
+	}
+	verifier := func(critical ...string) *jwt.Verifier {
+		v := sigOnlyVerifier(keys.public, jwa.ES256)
+		v.Critical = critical
+		return v
+	}
+
+	t.Run("No Critical Header", func(t *testing.T) {
+		if err := verifyToken(verifier(), signed(t, nil)); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 	})
 
 	t.Run("Valid Critical Header", func(t *testing.T) {
-		// Token with valid critical header that we support
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  []any{"custom-ext", "another-ext"},
-				"custom-ext":     "some-value",
-				"another-ext":    "another-value",
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
+		token := signed(t, jws.Header{
+			header.Critical: []any{"custom-ext", "another-ext"},
+			"custom-ext":    "some-value",
+			"another-ext":   "another-value",
+		})
+		if err := verifyToken(verifier("custom-ext", "another-ext"), token); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("custom-ext", "another-ext"),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
-		}
+		// Understood extensions are the caller's to check: not listing one
+		// refuses the token, however valid its signature.
+		requireRefused(t, verifier("custom-ext"), token, jwt.ErrFormat)
+		requireRefused(t, verifier(), token, jwt.ErrFormat)
 	})
 
 	t.Run("Unsupported Critical Header", func(t *testing.T) {
-		// Token with critical header that we don't support
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:       jwt.Type,
-				header.Algorithm:  jwa.None,
-				header.Critical:   []any{"unsupported-ext"},
-				"unsupported-ext": "some-value",
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("custom-ext"), // Different from what's in token
-		)
-		if err == nil || !strings.Contains(err.Error(), "unsupported critical header parameter: \"unsupported-ext\"") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "unsupported critical header parameter: \"unsupported-ext\"")
-		}
+		token := signed(t, jws.Header{
+			header.Critical:   []any{"unsupported-ext"},
+			"unsupported-ext": "some-value",
+		})
+		requireRefused(t, verifier("custom-ext"), token, jwt.ErrFormat)
 	})
 
 	t.Run("Critical Header Not Present", func(t *testing.T) {
-		// Token with critical header that references missing header parameter
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  []any{"missing-ext"},
-				// "missing-ext" is NOT present in header
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("missing-ext"),
-		)
-		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"missing-ext\" is missing from header") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"missing-ext\" is missing from header")
-		}
+		// "crit" names a parameter the header does not carry.
+		token := forged(t, map[string]any{"crit": []any{"missing-ext"}})
+		requireRefused(t, verifier("missing-ext"), token, jwt.ErrFormat)
 	})
 
 	t.Run("Empty Critical Header Array", func(t *testing.T) {
 		// RFC 7515 section 4.1.11: The "crit" header parameter MUST NOT be empty
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  []any{}, // Empty array
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-		)
-		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"crit\" must not be empty") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"crit\" must not be empty")
-		}
+		token := forged(t, map[string]any{"crit": []any{}})
+		requireRefused(t, verifier(), token, jwt.ErrFormat)
 	})
 
 	t.Run("Critical Header Wrong Type", func(t *testing.T) {
-		// Critical header must be an array
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  "not-an-array", // Wrong type
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-		)
-		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"crit\" must be an array") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"crit\" must be an array")
-		}
+		token := forged(t, map[string]any{"crit": "not-an-array"})
+		requireRefused(t, verifier(), token, jwt.ErrFormat)
 	})
 
 	t.Run("Critical Header Non-String Elements", func(t *testing.T) {
-		// Critical header array elements must be strings
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  []any{"valid-ext", 123}, // Non-string element
-				"valid-ext":      "some-value",
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("valid-ext"),
-		)
-		if err == nil || !strings.Contains(err.Error(), "critical header parameter names must be strings") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter names must be strings")
-		}
+		token := forged(t, map[string]any{"crit": []any{"valid-ext", 123}, "valid-ext": "some-value"})
+		requireRefused(t, verifier("valid-ext"), token, jwt.ErrFormat)
 	})
 
 	t.Run("Standard Header in Critical List", func(t *testing.T) {
 		// RFC 7515 section 4.1.11: Standard headers cannot be marked as critical
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.None,
-				header.Critical:  []any{"alg"}, // Standard header
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("alg"),
-		)
-		if err == nil || !strings.Contains(err.Error(), "critical header parameter \"alg\" is a standard header and cannot be marked as critical") {
-			t.Fatalf("token.Verify() error = %v, want error containing %q", err, "critical header parameter \"alg\" is a standard header and cannot be marked as critical")
-		}
+		token := forged(t, map[string]any{"crit": []any{"alg"}})
+		requireRefused(t, verifier("alg"), token, jwt.ErrFormat)
 	})
 
 	t.Run("Multiple Standard Headers in Critical List", func(t *testing.T) {
-		// Test various standard headers that cannot be critical
 		standardHeaders := []string{"alg", "jku", "jwk", "kid", "x5u", "x5c", "x5t", "x5t#S256", "typ", "cty", "crit"}
 
 		for _, stdHeader := range standardHeaders {
 			t.Run("Standard_"+stdHeader, func(t *testing.T) {
-				token := &jwt.Token{
-					Header: header.Parameters{
-						header.Type:      jwt.Type,
-						header.Algorithm: jwa.None,
-						header.Critical:  []any{stdHeader},
-					},
-					Claims: jwt.ClaimsSet{
-						jwt.Subject: "test",
-					},
-					Signature: []byte{}, // Empty for "none" algorithm
-				}
-
-				err := token.Verify(
-					jwt.WithAllowInsecureNoneAlgorithm(true),
-					jwt.WithAllowedAlgorithms(jwa.None),
-					jwt.WithSupportedCriticalHeaders(stdHeader),
-				)
-				if err == nil || !strings.Contains(err.Error(), "is a standard header and cannot be marked as critical") {
-					t.Fatalf("token.Verify() error = %v, want error containing %q", err, "is a standard header and cannot be marked as critical")
-				}
+				token := forged(t, map[string]any{"crit": []any{stdHeader}})
+				requireRefused(t, verifier(stdHeader), token, jwt.ErrFormat)
 			})
 		}
 	})
 
 	t.Run("Complex Valid Critical Header Scenario", func(t *testing.T) {
-		// More complex scenario with multiple valid critical headers
-		token := &jwt.Token{
-			Header: header.Parameters{
-				header.Type:        jwt.Type,
-				header.Algorithm:   jwa.None,
-				header.Critical:    []any{"custom-auth", "rate-limit", "version"},
-				"custom-auth":      "bearer-extended",
-				"rate-limit":       "100/minute",
-				"version":          "v2.0",
-				"non-critical-ext": "this-is-ok", // Non-critical extension
-			},
-			Claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-				jwt.Issuer:  "test-issuer",
-			},
-			Signature: []byte{}, // Empty for "none" algorithm
-		}
-
-		err := token.Verify(
-			jwt.WithAllowInsecureNoneAlgorithm(true),
-			jwt.WithAllowedAlgorithms(jwa.None),
-			jwt.WithSupportedCriticalHeaders("custom-auth", "rate-limit", "version", "other-ext"),
-		)
-		if err != nil {
-			t.Fatalf("token.Verify() error = %v", err)
+		token := signed(t, jws.Header{
+			header.Critical:    []any{"custom-auth", "rate-limit", "version"},
+			"custom-auth":      "bearer-extended",
+			"rate-limit":       "100/minute",
+			"version":          "v2.0",
+			"non-critical-ext": "this-is-ok", // Non-critical extension
+		})
+		if err := verifyToken(verifier("custom-auth", "rate-limit", "version", "other-ext"), token); err != nil {
+			t.Fatalf("Verify() error = %v", err)
 		}
 	})
 }
