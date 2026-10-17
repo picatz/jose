@@ -158,7 +158,7 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 		}
 		r.ID = base64url.Encode(id)
 	}
-	claims[jwt.JWTID] = r.ID
+	claims[jwt.ID] = r.ID
 	if !r.NotBefore.IsZero() {
 		claims[jwt.NotBefore] = r.NotBefore.Unix()
 	}

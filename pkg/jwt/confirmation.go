@@ -45,7 +45,13 @@ func ConfirmationFor(key any) (map[string]any, error) {
 // https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
 // https://www.rfc-editor.org/rfc/rfc9449.html#section-6.1
 func (c ClaimsSet) ConfirmedThumbprint() (string, bool) {
-	cnf, _ := c[Confirmation].(map[string]any)
+	var cnf map[string]any
+	switch v := c[Confirmation].(type) {
+	case map[string]any:
+		cnf = v
+	case ClaimsSet:
+		cnf = v
+	}
 	if len(cnf) != 1 {
 		return "", false
 	}

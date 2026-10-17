@@ -205,7 +205,7 @@ func (v *Verifier) Verify(ctx context.Context, proof string, req Request) (*Proo
 		Header:    signed.Header,
 		Claims:    claims,
 	}
-	if p.JTI, err = stringClaim(claims, jwt.JWTID, true); err != nil {
+	if p.JTI, err = stringClaim(claims, jwt.ID, true); err != nil {
 		return nil, err
 	}
 	if p.Method, err = stringClaim(claims, ClaimHTTPMethod, true); err != nil {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
-	"github.com/picatz/jose/pkg/jwk"
 	"github.com/picatz/jose/pkg/jwt"
 )
 
@@ -22,13 +21,13 @@ func main() {
 		header.Parameters{
 			header.Type:      jwt.Type,
 			header.Algorithm: jwa.HS256,
+			header.KeyID:     symmetricKeyID,
 		}, jwt.ClaimsSet{
-			jwt.Issuer:            "https://issuer.example",
-			jwt.Audience:          "https://api.example",
-			jwt.ExpirationTime:    time.Now().Add(time.Hour),
-			jwt.Subject:           "1234567890",
-			jwk.KeyID:             symmetricKeyID,
-			jwt.ClaimName("name"): "John Doe",
+			jwt.Issuer:         "https://issuer.example",
+			jwt.Audience:       "https://api.example",
+			jwt.ExpirationTime: time.Now().Add(time.Hour),
+			jwt.Subject:        "1234567890",
+			"name":             "John Doe",
 		},
 		symmetricKey,
 	)

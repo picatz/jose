@@ -354,7 +354,7 @@ func TestVerifyRefusals(t *testing.T) {
 	exp := now.Add(time.Minute).Unix()
 	bJKT, _ := thumbprint.FromPublicKey(f.b.Public())
 	good := func() map[string]any {
-		return map[string]any{jwt.Issuer: urn(t, f.a), jwt.ExpirationTime: exp, jwt.JWTID: "link-1", jwt.Confirmation: map[string]any{"jkt": bJKT}}
+		return map[string]any{jwt.Issuer: urn(t, f.a), jwt.ExpirationTime: exp, jwt.ID: "link-1", jwt.Confirmation: map[string]any{"jkt": bJKT}}
 	}
 	with := func(name string, value any) map[string]any {
 		claims := good()
@@ -389,7 +389,7 @@ func TestVerifyRefusals(t *testing.T) {
 		"caveat string":      link(with(jwtchain.ClaimCaveats, "path:/"), nil),
 		"scope double space": link(with(jwt.Scope, "read  write"), nil),
 		"empty audience":     link(with(jwt.Audience, []string{}), nil),
-		"numeric jti":        link(with(jwt.JWTID, 7), nil),
+		"numeric jti":        link(with(jwt.ID, 7), nil),
 		"expired":            link(with(jwt.ExpirationTime, now.Add(-time.Hour).Unix()), nil),
 		"not yet valid":      link(with(jwt.NotBefore, now.Add(10*time.Minute).Unix()), nil),
 		"other typ":          link(good(), func(h jws.Header) { h[header.Type] = "JWT" }),
@@ -597,7 +597,7 @@ func TestReissueWithLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims[jwt.IssuedAt], claims[jwt.JWTID] = now.Unix(), "reissued-1"
+	claims[jwt.IssuedAt], claims[jwt.ID] = now.Unix(), "reissued-1"
 	if claims[jwt.Issuer] != "https://issuer.example" || claims[jwt.Subject] != "alice" || claims[jwt.Scope] != "read" || claims[jwt.ExpirationTime] != now.Add(10*time.Minute).Unix() {
 		t.Fatalf("Claims() = %v", claims)
 	}
@@ -764,7 +764,7 @@ func TestReviewRegressions(t *testing.T) {
 		policy.Now = func() time.Time { return now.Add(2 * time.Hour) }
 		// The garbage link would fail its signature check; expiry is
 		// reported first.
-		garbage := forge(t, f.root, f.b, jwa.EdDSA, map[string]any{jwt.Issuer: urn(t, f.b), jwt.ExpirationTime: now.Unix(), jwt.JWTID: "x"}, nil)
+		garbage := forge(t, f.root, f.b, jwa.EdDSA, map[string]any{jwt.Issuer: urn(t, f.b), jwt.ExpirationTime: now.Unix(), jwt.ID: "x"}, nil)
 		if _, err := policy.Verify(t.Context(), f.root+jwtchain.Separator+garbage); err == nil || !strings.Contains(err.Error(), "expired") {
 			t.Fatalf("Verify() error = %v, want expired", err)
 		}

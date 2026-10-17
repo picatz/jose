@@ -62,8 +62,8 @@ func main() {
 			return
 		}
 
-		sub, err := token.Claims.Get(jwt.Subject)
-		if err != nil {
+		sub, ok := token.Claims[jwt.Subject]
+		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -73,8 +73,8 @@ func main() {
 			return
 		}
 
-		name, err := token.Claims.Get("name")
-		if err != nil {
+		name, ok := token.Claims["name"]
+		if !ok {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}

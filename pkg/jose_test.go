@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -28,10 +29,7 @@ func Example_verify() {
 		panic(fmt.Sprintf("failed to verify JWT: %v", err))
 	}
 
-	sub, err := token.Claims.Get(jwt.Subject)
-	if err != nil {
-		panic(fmt.Sprintf("failed to get JWT claim %q: %v", jwt.Subject, err))
-	}
+	sub := token.Claims[jwt.Subject]
 
 	fmt.Println(sub)
 	// Output: 1234567890
@@ -78,31 +76,22 @@ func TestExampleJWTVerifyHS256(t *testing.T) {
 		t.Fatalf("typ = %v, want %v", typ, jwt.Type)
 	}
 
-	claimNames := token.Claims.Names()
-	if !slices.Equal(claimNames, []jwt.ClaimName{"sub", "name", "iat"}) {
-		t.Fatalf("claimNames = %v, want %v", claimNames, []jwt.ClaimName{"sub", "name", "iat"})
+	claimNames := slices.Sorted(maps.Keys(token.Claims))
+	if !slices.Equal(claimNames, []string{"iat", "name", "sub"}) {
+		t.Fatalf("claimNames = %v, want %v", claimNames, []string{"iat", "name", "sub"})
 	}
 
-	sub, err := token.Claims.Get(jwt.Subject)
-	if err != nil {
-		t.Fatalf("token.Claims.Get() error = %v", err)
-	}
+	sub := token.Claims[jwt.Subject]
 	if sub != "1234567890" {
 		t.Fatalf("sub = %q, want %q", sub, "1234567890")
 	}
 
-	iat, err := token.Claims.Get(jwt.IssuedAt)
-	if err != nil {
-		t.Fatalf("token.Claims.Get() error = %v", err)
-	}
+	iat := token.Claims[jwt.IssuedAt]
 	if iat != int64(1516239022) {
 		t.Fatalf("iat = %v, want %v", iat, int64(1516239022))
 	}
 
-	name, err := token.Claims.Get("name")
-	if err != nil {
-		t.Fatalf("token.Claims.Get() error = %v", err)
-	}
+	name := token.Claims["name"]
 	if name != "picatz" {
 		t.Fatalf("name = %q, want %q", name, "picatz")
 	}

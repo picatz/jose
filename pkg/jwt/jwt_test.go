@@ -123,15 +123,9 @@ func TestTokenString(t *testing.T) {
 		},
 	}
 
-	// An unsigned token has no signature segment.
-	if strings.Count(token.String(), ".") != 1 {
-		t.Fatalf("strings.Count(token.String(), \".\") = %v, want %v", strings.Count(token.String(), "."), 1)
-	}
-	if len(token.Signature) != 0 {
-		t.Fatalf("token.Signature = %v, want empty", token.Signature)
-	}
-	if !strings.HasPrefix(token.String(), "eyJ") {
-		t.Fatalf("token.String() = %q, want prefix %q", token.String(), "eyJ")
+	// A token built by hand was never signed, so it has no serialization.
+	if got := token.String(); got != "" {
+		t.Fatalf("unsigned token.String() = %q, want empty", got)
 	}
 
 	signed, err := jwt.New(token.Header, token.Claims, testHMACSecretKey)
