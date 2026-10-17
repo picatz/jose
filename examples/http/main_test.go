@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
@@ -29,13 +30,22 @@ func Test_main(t *testing.T) {
 			header.Algorithm: jwa.ES256,
 		},
 		jwt.ClaimsSet{
-			"sub":  "1234567890",
-			"name": "John Doe",
+			jwt.Issuer:         "https://issuer.example",
+			jwt.Audience:       "https://api.example",
+			jwt.ExpirationTime: time.Now().Add(time.Hour),
+			"sub":              "1234567890",
+			"name":             "John Doe",
 		},
 		private,
 	)
 	if err != nil {
 		panic(err)
+	}
+
+	verifier := &jwt.Verifier{
+		Keys:     jwt.Keys{{Public: &private.PublicKey}},
+		Issuer:   "https://issuer.example",
+		Audience: "https://api.example",
 	}
 
 	mux := http.NewServeMux()
@@ -47,7 +57,7 @@ func Test_main(t *testing.T) {
 			return
 		}
 
-		token, err = jwt.ParseAndVerify(bearerToken, jwt.WithKey(&private.PublicKey))
+		token, err = verifier.Verify(r.Context(), bearerToken)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return

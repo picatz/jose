@@ -1,17 +1,15 @@
 package jwt_test
 
 import (
-	"bytes"
-	"crypto"
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/hmac"
 	"crypto/rsa"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
@@ -104,8 +102,7 @@ func TestTokenString(t *testing.T) {
 		},
 	}
 
-	t.Logf("before sign: %s", token)
-
+	// An unsigned token has no signature segment.
 	if strings.Count(token.String(), ".") != 1 {
 		t.Fatalf("strings.Count(token.String(), \".\") = %v, want %v", strings.Count(token.String(), "."), 1)
 	}
@@ -116,28 +113,48 @@ func TestTokenString(t *testing.T) {
 		t.Fatalf("token.String() = %q, want prefix %q", token.String(), "eyJ")
 	}
 
-	sig, err := token.Sign(testHMACSecretKey)
+	signed, err := jwt.New(token.Header, token.Claims, testHMACSecretKey)
 	if err != nil {
-		t.Fatalf("token.Sign() error = %v", err)
-	}
-	if len(sig) == 0 {
-		t.Fatal("sig is empty")
+		t.Fatalf("jwt.New() error = %v", err)
 	}
 
-	t.Logf("after sign: %s", token)
-
-	if strings.Count(token.String(), ".") != 2 {
-		t.Fatalf("strings.Count(token.String(), \".\") = %v, want %v", strings.Count(token.String(), "."), 2)
+	if strings.Count(signed.String(), ".") != 2 {
+		t.Fatalf("strings.Count(signed.String(), \".\") = %v, want %v", strings.Count(signed.String(), "."), 2)
 	}
-	if len(token.Signature) == 0 {
-		t.Fatal("token.Signature is empty")
+	if len(signed.Signature) == 0 {
+		t.Fatal("signed.Signature is empty")
 	}
-	if !strings.HasPrefix(token.String(), "eyJ") {
-		t.Fatalf("token.String() = %q, want prefix %q", token.String(), "eyJ")
+	if !strings.HasPrefix(signed.String(), "eyJ") {
+		t.Fatalf("signed.String() = %q, want prefix %q", signed.String(), "eyJ")
 	}
 }
 
-func TestParseStringAndVerify(t *testing.T) {
+// sigOnlyVerifier returns a [jwt.Verifier] for key that checks the JOSE
+// layer and signature but skips the claim policy a test does not exercise:
+// issuer, audience and the "exp" requirement. HMAC algorithms must be
+// listed in algs, as the Verifier never accepts them by default.
+func sigOnlyVerifier(key any, algs ...jwa.Algorithm) *jwt.Verifier {
+	if secret, ok := key.(string); ok {
+		key = []byte(secret)
+	}
+	v := &jwt.Verifier{
+		Keys:          jwt.Keys{{Public: key}},
+		AnyIssuer:     true,
+		AnyAudience:   true,
+		AllowNoExpiry: true,
+	}
+	if len(algs) > 0 {
+		v.Algorithms = algs
+	}
+	return v
+}
+
+func verifyToken(v *jwt.Verifier, token string) error {
+	_, err := v.Verify(context.Background(), token)
+	return err
+}
+
+func TestParseAndVerify(t *testing.T) {
 	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 	ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
 	eddsaKeyPair := testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
@@ -187,7 +204,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			name: "empty",
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err == nil {
-					t.Fatal("ParseString() error = nil, want non-nil")
+					t.Fatal("Parse() error = nil, want non-nil")
 				}
 				if token != nil {
 					t.Fatalf("token = %v, want nil", token)
@@ -199,7 +216,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: "eqwfixwjwwkgjiw.ufo....",
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err == nil {
-					t.Fatal("ParseString() error = nil, want non-nil")
+					t.Fatal("Parse() error = nil, want non-nil")
 				}
 				if token != nil {
 					t.Fatalf("token = %v, want nil", token)
@@ -211,7 +228,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: ecdsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err != nil {
-					t.Fatalf("ParseString() error = %v", err)
+					t.Fatalf("Parse() error = %v", err)
 				}
 				if token.Header[header.Algorithm] != jwa.ES256 {
 					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.ES256)
@@ -226,26 +243,8 @@ func TestParseStringAndVerify(t *testing.T) {
 					t.Fatal("token.Signature is empty")
 				}
 
-				sig, err := token.ECDSASignature(crypto.SHA256, ecdsaKeyPair.private)
-				if err != nil {
-					t.Fatalf("token.ECDSASignature() error = %v", err)
-				}
-				if len(sig) == 0 {
-					t.Fatal("sig is empty")
-				}
-				if len(token.Signature) != len(sig) {
-					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
-				}
-				if bytes.Equal(sig, token.Signature) {
-					t.Fatalf("ECDSASignature() = %x, want it to differ from token.Signature", sig)
-				}
-
-				if err := token.VerifyECDSASignature(crypto.SHA256, ecdsaKeyPair.public); err != nil {
-					t.Fatalf("token.VerifyECDSASignature() error = %v", err)
-				}
-
-				if err := token.Verify(jwt.WithKey(ecdsaKeyPair.public)); err != nil {
-					t.Fatalf("token.Verify() error = %v", err)
+				if err := verifyToken(sigOnlyVerifier(ecdsaKeyPair.public), ecdsaToken.String()); err != nil {
+					t.Fatalf("Verify() error = %v", err)
 				}
 			},
 		},
@@ -254,7 +253,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: ecdsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err != nil {
-					t.Fatalf("ParseString() error = %v", err)
+					t.Fatalf("Parse() error = %v", err)
 				}
 				if token.Header[header.Algorithm] != jwa.ES256 {
 					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.ES256)
@@ -269,8 +268,8 @@ func TestParseStringAndVerify(t *testing.T) {
 					t.Fatal("token.Signature is empty")
 				}
 
-				if err := token.Verify(jwt.WithKey(ecdsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.RS256)); err == nil {
-					t.Fatal("token.Verify() error = nil, want non-nil")
+				if err := verifyToken(sigOnlyVerifier(ecdsaKeyPair.public, jwa.RS256), ecdsaToken.String()); !errors.Is(err, jwt.ErrFormat) {
+					t.Fatalf("Verify() error = %v, want %v", err, jwt.ErrFormat)
 				}
 			},
 		},
@@ -279,7 +278,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: rsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err != nil {
-					t.Fatalf("ParseString() error = %v", err)
+					t.Fatalf("Parse() error = %v", err)
 				}
 				if token.Header[header.Algorithm] != jwa.RS256 {
 					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.RS256)
@@ -294,42 +293,8 @@ func TestParseStringAndVerify(t *testing.T) {
 					t.Fatal("token.Signature is empty")
 				}
 
-				sig, err := token.RSASignature(crypto.SHA256, rsaKeyPair.private)
-				if err != nil {
-					t.Fatalf("token.RSASignature() error = %v", err)
-				}
-				if len(sig) == 0 {
-					t.Fatal("sig is empty")
-				}
-				if len(token.Signature) != len(sig) {
-					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
-				}
-				if !bytes.Equal(token.Signature, sig) {
-					t.Fatalf("token.Signature = %x, want %x", token.Signature, sig)
-				}
-
-				sigEnc, err := base64.Encode(sig)
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
-				if len(sigEnc) == 0 {
-					t.Fatal("sigEnc is empty")
-				}
-
-				tokenSigEnc, err := base64.Encode(token.Signature)
-				if err != nil {
-					t.Fatalf("base64.Encode() error = %v", err)
-				}
-				if tokenSigEnc != sigEnc {
-					t.Fatalf("tokenSigEnc = %v, want %v", tokenSigEnc, sigEnc)
-				}
-
-				if err := token.VerifyRSASignature(crypto.SHA256, rsaKeyPair.public); err != nil {
-					t.Fatalf("token.VerifyRSASignature() error = %v", err)
-				}
-
-				if err := token.Verify(jwt.WithKey(rsaKeyPair.public)); err != nil {
-					t.Fatalf("token.Verify() error = %v", err)
+				if err := verifyToken(sigOnlyVerifier(rsaKeyPair.public), rsaToken.String()); err != nil {
+					t.Fatalf("Verify() error = %v", err)
 				}
 			},
 		},
@@ -338,7 +303,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err == nil {
-					t.Fatal("ParseString() error = nil, want non-nil")
+					t.Fatal("Parse() error = nil, want non-nil")
 				}
 				if token != nil {
 					t.Fatalf("token = %v, want nil", token)
@@ -350,7 +315,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err == nil {
-					t.Fatal("ParseString() error = nil, want non-nil")
+					t.Fatal("Parse() error = nil, want non-nil")
 				}
 				if token != nil {
 					t.Fatalf("token = %v, want nil", token)
@@ -362,7 +327,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: `eyJ0eXAiOiJKV1QiLA0KICJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`,
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err != nil {
-					t.Fatalf("ParseString() error = %v", err)
+					t.Fatalf("Parse() error = %v", err)
 				}
 				if token.Header[header.Algorithm] != jwa.HS256 {
 					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.HS256)
@@ -383,26 +348,23 @@ func TestParseStringAndVerify(t *testing.T) {
 					t.Fatal("token.Signature is empty")
 				}
 
-				sig, err := token.HMACSignature(crypto.SHA256, testHMACSecretKey)
-				if err != nil {
-					t.Fatalf("token.HMACSignature() error = %v", err)
-				}
-				if len(sig) == 0 {
-					t.Fatal("sig is empty")
-				}
-				if !hmac.Equal([]byte(sig), token.Signature) {
-					t.Fatalf("HMACSignature() = %x, want %x", sig, token.Signature)
+				// The RFC 7515 Appendix A.1 token expired in 2011.
+				hmacVerifier := sigOnlyVerifier(testHMACSecretKey, jwa.HS256)
+				hmacVerifier.Now = func() time.Time { return time.Unix(1300819380, 0).Add(time.Hour) }
+				hmacVerifier.Leeway = time.Second
+				if err := verifyToken(hmacVerifier, token.String()); !errors.Is(err, jwt.ErrExpired) {
+					t.Fatalf("Verify() error = %v, want %v", err, jwt.ErrExpired)
 				}
 
-				err = token.VerifyHMACSignature(crypto.SHA256, testHMACSecretKey)
-				if err != nil {
-					t.Fatalf("token.VerifyHMACSignature() error = %v", err)
+				// Before expiry it verifies, so the refusal above is about time.
+				hmacVerifier.Now = func() time.Time { return time.Unix(1300819380, 0).Add(-time.Hour) }
+				if err := verifyToken(hmacVerifier, token.String()); err != nil {
+					t.Fatalf("Verify() before expiry error = %v", err)
 				}
 
-				// Token is expired
-				err = token.Verify(jwt.WithKey(testHMACSecretKey), jwt.WithAllowedAlgorithms(jwa.HS256))
-				if err == nil {
-					t.Fatal("token.Verify() error = nil, want non-nil")
+				// HMAC is never accepted unless the caller lists it.
+				if err := verifyToken(sigOnlyVerifier(testHMACSecretKey), token.String()); !errors.Is(err, jwt.ErrFormat) {
+					t.Fatalf("Verify() with default algorithms error = %v, want %v", err, jwt.ErrFormat)
 				}
 			},
 		},
@@ -411,7 +373,7 @@ func TestParseStringAndVerify(t *testing.T) {
 			input: eddsaToken.String(),
 			check: func(t *testing.T, token *jwt.Token, err error) {
 				if err != nil {
-					t.Fatalf("ParseString() error = %v", err)
+					t.Fatalf("Parse() error = %v", err)
 				}
 				if token.Header[header.Algorithm] != jwa.EdDSA {
 					t.Fatalf("token.Header[header.Algorithm] = %v, want %v", token.Header[header.Algorithm], jwa.EdDSA)
@@ -426,28 +388,8 @@ func TestParseStringAndVerify(t *testing.T) {
 					t.Fatal("token.Signature is empty")
 				}
 
-				sig, err := token.EdDSASignature(eddsaKeyPair.private)
-				if err != nil {
-					t.Fatalf("token.EdDSASignature() error = %v", err)
-				}
-				if len(sig) == 0 {
-					t.Fatal("sig is empty")
-				}
-				if len(token.Signature) != len(sig) {
-					t.Fatalf("len(token.Signature) = %v, want %v", len(token.Signature), len(sig))
-				}
-				if !bytes.Equal(token.Signature, sig) {
-					t.Fatalf("token.Signature = %x, want %x", token.Signature, sig)
-				}
-
-				err = token.VerifyEdDSASignature(eddsaKeyPair.public)
-				if err != nil {
-					t.Fatalf("token.VerifyEdDSASignature() error = %v", err)
-				}
-
-				err = token.Verify(jwt.WithKey(eddsaKeyPair.public), jwt.WithAllowedAlgorithms(jwa.EdDSA))
-				if err != nil {
-					t.Fatalf("token.Verify() error = %v", err)
+				if err := verifyToken(sigOnlyVerifier(eddsaKeyPair.public, jwa.EdDSA), eddsaToken.String()); err != nil {
+					t.Fatalf("Verify() error = %v", err)
 				}
 			},
 		},
@@ -455,34 +397,9 @@ func TestParseStringAndVerify(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			token, err := jwt.ParseString(test.input)
+			token, err := jwt.Parse(test.input)
 			test.check(t, token, err)
 		})
-	}
-}
-
-func TestSignJWT(t *testing.T) {
-	keyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
-
-	token := &jwt.Token{
-		Header: header.Parameters{
-			header.Type:      jwt.Type,
-			header.Algorithm: jwa.RS256,
-		},
-		Claims: jwt.ClaimsSet{
-			jwt.Subject: "test",
-		},
-	}
-
-	sig, err := token.Sign(keyPair.private)
-	if err != nil {
-		t.Fatalf("token.Sign() error = %v", err)
-	}
-	if sig == nil {
-		t.Fatal("sig = nil, want non-nil")
-	}
-	if !bytes.Equal(sig, token.Signature) {
-		t.Fatalf("sig = %x, want %x", sig, token.Signature)
 	}
 }
 
@@ -514,7 +431,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 		},
 		{
 			name: "RSA SHA256 with audience as string",
@@ -528,7 +445,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 			allowedAudiences:        []string{"test"},
 		},
 		{
@@ -543,7 +460,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 			allowedAudiences:        []string{"test"},
 		},
 		{
@@ -557,7 +474,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              rsaKeyPair.private,
 			verifyKey:               rsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 		},
 		{
 			name: "ECDSA SHA256",
@@ -570,7 +487,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              ecdsaKeyPair.private,
 			verifyKey:               ecdsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 		},
 		{
 			name: "EdDSA",
@@ -583,7 +500,7 @@ func TestNew(t *testing.T) {
 			},
 			signingKey:              eddsaKeyPair.private,
 			verifyKey:               eddsaKeyPair.public,
-			allowedVerifyAlgorithms: jwt.DefaultAllowedAlgorithms(),
+			allowedVerifyAlgorithms: jwt.DefaultAlgorithms,
 		},
 		{
 			name: "HMAC SHA256",
@@ -604,32 +521,22 @@ func TestNew(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			token := testToken(t, test.header, test.claims, test.signingKey)
 
-			verifyOpts := []jwt.VerifyOption{
-				jwt.WithAllowedAlgorithms(test.allowedVerifyAlgorithms...),
-			}
-
-			if test.verifyKey != nil {
-				switch verifyKey := test.verifyKey.(type) {
-				case *rsa.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case *ecdsa.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case ed25519.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case []byte:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				default:
-					t.Fatalf("potentially unsupported verify key type: %T", verifyKey)
-				}
-			}
-
+			verifier := sigOnlyVerifier(test.verifyKey, test.allowedVerifyAlgorithms...)
 			if len(test.allowedAudiences) > 0 {
-				verifyOpts = append(verifyOpts, jwt.WithAllowedAudiences(test.allowedAudiences...))
+				verifier.AnyAudience = false
+				verifier.Audience = test.allowedAudiences[0]
 			}
 
-			err := token.Verify(verifyOpts...)
-			if err != nil {
-				t.Fatalf("token.Verify() error = %v", err)
+			if err := verifyToken(verifier, token.String()); err != nil {
+				t.Fatalf("Verify() error = %v", err)
+			}
+
+			// A verifier for a different audience refuses the same token.
+			if len(test.allowedAudiences) > 0 {
+				verifier.Audience = "other"
+				if err := verifyToken(verifier, token.String()); !errors.Is(err, jwt.ErrClaims) {
+					t.Fatalf("Verify() for another audience error = %v, want %v", err, jwt.ErrClaims)
+				}
 			}
 		})
 	}
@@ -640,91 +547,66 @@ func TestNewExpired(t *testing.T) {
 	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
 	tests := []struct {
-		name       string
-		header     header.Parameters
-		claims     jwt.ClaimsSet
-		signingKey any
-		expired    bool
-		expires    bool
+		name   string
+		claims jwt.ClaimsSet
+		// verifyErr is the sentinel Verify must wrap, or nil to accept.
+		verifyErr error
+		// allowNoExpiry lets the verifier accept a token without "exp".
+		allowNoExpiry bool
 	}{
 		{
 			name: "expired",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
 			claims: jwt.ClaimsSet{
 				jwt.Subject:        "test",
 				jwt.IssuedAt:       time.Now().Unix(),
 				jwt.ExpirationTime: time.Now().Add(-time.Hour).Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			expired:    true,
-			expires:    true,
+			verifyErr: jwt.ErrExpired,
 		},
 		{
 			name: "not expired",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
 			claims: jwt.ClaimsSet{
 				jwt.Subject:        "test",
 				jwt.IssuedAt:       time.Now().Unix(),
 				jwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			expired:    false,
-			expires:    true,
 		},
 		{
-			name: "not expires",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
+			name: "does not expire, refused by default",
 			claims: jwt.ClaimsSet{
 				jwt.Subject:  "test",
 				jwt.IssuedAt: time.Now().Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			expired:    false,
-			expires:    false,
+			verifyErr: jwt.ErrClaims,
+		},
+		{
+			name: "does not expire, accepted when the verifier opts in",
+			claims: jwt.ClaimsSet{
+				jwt.Subject:  "test",
+				jwt.IssuedAt: time.Now().Unix(),
+			},
+			allowNoExpiry: true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			token := testToken(t, test.header, test.claims, test.signingKey)
+			token := testToken(t,
+				header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+				test.claims, rsaKeyPair.private)
 
-			expires, err := token.Expires()
-			if err != nil {
-				t.Fatalf("token.Expires() error = %v", err)
+			verifier := sigOnlyVerifier(rsaKeyPair.public)
+			verifier.AllowNoExpiry = test.allowNoExpiry
+
+			err := verifyToken(verifier, token.String())
+			if test.verifyErr == nil {
+				if err != nil {
+					t.Fatalf("Verify() error = %v", err)
+				}
+				return
 			}
-
-			if test.expires {
-				if !expires {
-					t.Fatal("expires = false, want true")
-				}
-			} else {
-				if expires {
-					t.Fatal("expires = true, want false")
-				}
-			}
-
-			expired, err := token.Expired(time.Now)
-			if err != nil {
-				t.Fatalf("token.Expired() error = %v", err)
-			}
-
-			if test.expired {
-				if !expired {
-					t.Fatal("expired = false, want true")
-				}
-			} else {
-				if expired {
-					t.Fatal("expired = true, want false")
-				}
+			if !errors.Is(err, test.verifyErr) || !errors.Is(err, jwt.ErrInvalidToken) {
+				t.Fatalf("Verify() error = %v, want %v and %v", err, test.verifyErr, jwt.ErrInvalidToken)
 			}
 		})
 	}
@@ -733,124 +615,68 @@ func TestNewExpired(t *testing.T) {
 func TestVerify(t *testing.T) {
 	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
 
-	checkSuccess := func(t *testing.T, token *jwt.Token, err error) {
-		if err != nil {
-			t.Fatalf("Verify() error = %v", err)
-		}
-		if token == nil {
-			t.Fatal("token = nil, want non-nil")
-		}
-	}
-
-	checkFailure := func(t *testing.T, token *jwt.Token, err error) {
-		if err == nil {
-			t.Fatal("Verify() error = nil, want non-nil")
-		}
-		if token == nil {
-			t.Fatal("token = nil, want non-nil")
-		}
-	}
-
 	tests := []struct {
-		name       string
-		header     header.Parameters
-		claims     jwt.ClaimsSet
-		signingKey any
-		verifyKey  any
-		check      func(t *testing.T, token *jwt.Token, err error)
+		name      string
+		claims    jwt.ClaimsSet
+		verifyErr error
 	}{
 		{
 			name: "RSA SHA256",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
 			claims: jwt.ClaimsSet{
 				jwt.Subject:        "test",
 				jwt.IssuedAt:       time.Now().Unix(),
 				jwt.ExpirationTime: time.Now().Add(time.Hour).Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			verifyKey:  rsaKeyPair.public,
-			check:      checkSuccess,
-		},
-		{
-			name: "RSA SHA256 no expiration",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
-			claims: jwt.ClaimsSet{
-				jwt.Subject: "test",
-			},
-			signingKey: rsaKeyPair.private,
-			verifyKey:  rsaKeyPair.public,
-			check:      checkSuccess,
 		},
 		{
 			name: "RSA SHA256 expired",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
 			claims: jwt.ClaimsSet{
 				jwt.Subject:        "test",
 				jwt.IssuedAt:       time.Now().Unix(),
 				jwt.ExpirationTime: time.Now().Add(-time.Hour).Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			verifyKey:  rsaKeyPair.public,
-			check:      checkFailure,
+			verifyErr: jwt.ErrExpired,
 		},
 		{
 			name: "RSA SHA256 unable to use yet",
-			header: header.Parameters{
-				header.Type:      jwt.Type,
-				header.Algorithm: jwa.RS256,
-			},
 			claims: jwt.ClaimsSet{
-				jwt.Subject:   "test",
-				jwt.IssuedAt:  time.Now().Unix(),
-				jwt.NotBefore: time.Now().Add(30 * time.Second).Unix(),
+				jwt.Subject:        "test",
+				jwt.IssuedAt:       time.Now().Unix(),
+				jwt.NotBefore:      time.Now().Add(time.Hour).Unix(),
+				jwt.ExpirationTime: time.Now().Add(2 * time.Hour).Unix(),
 			},
-			signingKey: rsaKeyPair.private,
-			verifyKey:  rsaKeyPair.public,
-			check:      checkFailure,
+			verifyErr: jwt.ErrNotYetValid,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			token := testToken(t, test.header, test.claims, test.signingKey)
+			token := testToken(t,
+				header.Parameters{header.Type: jwt.Type, header.Algorithm: jwa.RS256},
+				test.claims, rsaKeyPair.private)
 
-			verifyOpts := []jwt.VerifyOption{}
-
-			if test.verifyKey != nil {
-				switch verifyKey := test.verifyKey.(type) {
-				case *rsa.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case *ecdsa.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case ed25519.PublicKey:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case []byte:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				case string:
-					verifyOpts = append(verifyOpts, jwt.WithKey(verifyKey))
-				default:
-					t.Fatalf("unsupported verify key type: %T", verifyKey)
+			parsed, err := sigOnlyVerifier(rsaKeyPair.public).Verify(context.Background(), token.String())
+			if test.verifyErr == nil {
+				if err != nil {
+					t.Fatalf("Verify() error = %v", err)
 				}
+				if parsed == nil {
+					t.Fatal("token = nil, want non-nil")
+				}
+				return
 			}
-
-			err := token.Verify(verifyOpts...)
-
-			test.check(t, token, err)
+			if !errors.Is(err, test.verifyErr) {
+				t.Fatalf("Verify() error = %v, want %v", err, test.verifyErr)
+			}
+			if parsed != nil {
+				t.Fatalf("token = %v, want nil on refusal", parsed)
+			}
 		})
 	}
 }
 
-// go test -fuzz FuzzParseString
-func FuzzParseString(f *testing.F) {
+// go test -fuzz FuzzParse
+func FuzzParse(f *testing.F) {
 	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0.")
 	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0")
 	f.Add("eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJ0ZXN0In0.eyJzdWIiOiJ0ZXN0In0")
@@ -861,16 +687,16 @@ func FuzzParseString(f *testing.F) {
 	f.Add("eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJmb28iOiJiYXIifQ.FhkiHkoESI_cG3NPigFrxEk9Z60_oXrOT2vGm9Pn6RDgYNovYORQmmA0zs1AoAOf09ly2Nx2YAg6ABqAYga1AcMFkJljwxTT5fYphTuqpWdy4BELeSYJx5Ty2gmr8e7RonuUztrdD5WfPqLKMm1Ozp_T6zALpRmwTIW0QPnaBXaQD90FplAg46Iy1UlDKr-Eupy0i5SLch5Q-p2ZpaL_5fnTIUDlxC3pWhJTyx_71qDI-mAA_5lE_VdroOeflG56sSmDxopPEG3bFlSu1eowyBfxtu0_CuVd-M42RU75Zc4Gsj6uV77MBtbMrf4_7M_NUTSgoIF3fRqxrj0NzihIBg")
 
 	f.Fuzz(func(t *testing.T, data string) {
-		_, err := jwt.ParseString(data)
+		_, err := jwt.Parse(data)
 		if err != nil {
 			t.Skip()
 		}
 	})
 }
 
-var parseStringResult *jwt.Token
+var parseResult *jwt.Token
 
-func BenchmarkParseString(b *testing.B) {
+func BenchmarkParse(b *testing.B) {
 	s := "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJmb28iOiJiYXIifQ.feG39E-bn8HXAKhzDZq7yEAPWYDhZlwTn3sePJnU9VrGMmwdXAIEyoOnrjreYlVM_Z4N13eK9-TmMTWyfKJtHQ"
 
 	var err error
@@ -878,9 +704,9 @@ func BenchmarkParseString(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		parseStringResult, err = jwt.ParseString(s)
+		parseResult, err = jwt.Parse(s)
 		if err != nil {
-			b.Fatalf("jwt.ParseString() error = %v", err)
+			b.Fatalf("jwt.Parse() error = %v", err)
 		}
 	}
 }

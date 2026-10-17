@@ -43,6 +43,7 @@ type state struct {
 	hasScope     bool
 	notBefore    time.Time
 	expiry       time.Time
+	issuedAt     time.Time // the latest link "iat", if any
 	caveats      []string
 	holder       string         // JWK Thumbprint of the current holder, if any
 	confirmation map[string]any // the current "cnf", as given
@@ -167,8 +168,12 @@ func (s *state) apply(t *token, algorithms []jwa.Algorithm) error {
 		return linkErr("%q must be the signer's thumbprint URI", jwt.Issuer)
 	}
 	if v, ok := claims[jwt.IssuedAt]; ok {
-		if _, err := numericDate(v, false); err != nil {
+		issuedAt, err := numericDate(v, false)
+		if err != nil {
 			return linkErr("%q: %v", jwt.IssuedAt, err)
+		}
+		if issuedAt.After(s.issuedAt) {
+			s.issuedAt = issuedAt
 		}
 	}
 	// Every link has an identifier, so replay caches and revocation lists

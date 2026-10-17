@@ -36,14 +36,12 @@ func ExampleNew_symmetric() {
 		secretKeyBytes,
 	)
 
-	_ = token.Verify(jwt.WithAllowedAlgorithms(jwa.HS256), jwt.WithKey(secretKeyBytes))
-
 	fmt.Println(token)
 	// Output: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOi02MjEzNTUxMDQwMCwiaWF0IjotNjIxMzU1OTY4MDAsIm5iZiI6LTYyMTM1NTg5NjAwLCJzdWIiOiJleGFtcGxlIn0.9GTH7vLxrY4VmuMexoSBOPG5-Z1hoCpfOPcu5jWbo5I
 }
 
 func ExampleNew_asymmetric() {
-	publicKey, privateKey, _ := keyutil.NewRSAKeyPair()
+	_, privateKey, _ := keyutil.NewRSAKeyPair()
 
 	token, _ := jwt.New(
 		header.Parameters{
@@ -58,8 +56,6 @@ func ExampleNew_asymmetric() {
 		},
 		privateKey,
 	)
-
-	_ = token.Verify(jwt.WithAllowedAlgorithms(jwa.RS256), jwt.WithKey(publicKey))
 
 	fmt.Println(token.Claims[jwt.Subject])
 	// Output: example
