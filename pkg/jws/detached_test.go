@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
@@ -23,7 +23,7 @@ const (
 
 func rfc7797HMACKey(t *testing.T) []byte {
 	t.Helper()
-	key, err := base64.Decode(rfc7797Key)
+	key, err := base64url.Decode(rfc7797Key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,10 +105,7 @@ func TestDetachedUnencodedPayload(t *testing.T) {
 func TestUnencodedPayloadRefusals(t *testing.T) {
 	encode := func(t *testing.T, h string) string {
 		t.Helper()
-		s, err := base64.Encode([]byte(h))
-		if err != nil {
-			t.Fatal(err)
-		}
+		s := base64url.Encode([]byte(h))
 		return s
 	}
 	const sig = "A5dxf2s96_n5FLueVuW1Z_vh161FwXZC4YLPff6dmDY"

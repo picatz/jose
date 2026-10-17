@@ -37,7 +37,7 @@ const (
 // ContentEncryption identifies a JWE content encryption algorithm ("enc").
 //
 // https://www.rfc-editor.org/rfc/rfc7518.html#section-5.1
-type ContentEncryption = string
+type ContentEncryption string
 
 // Content encryption algorithms for JWE ("enc").
 const (

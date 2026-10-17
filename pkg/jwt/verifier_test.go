@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -166,9 +166,9 @@ func TestVerifierRefuses(t *testing.T) {
 
 func unsecured(t *testing.T, claims any) string {
 	t.Helper()
-	h, _ := base64.Encode([]byte(`{"alg":"none","typ":"at+jwt"}`))
+	h := base64url.Encode([]byte(`{"alg":"none","typ":"at+jwt"}`))
 	payload, _ := json.Marshal(claims)
-	p, _ := base64.Encode(payload)
+	p := base64url.Encode(payload)
 	return h + "." + p + "."
 }
 
@@ -327,7 +327,7 @@ func TestKeysFromSet(t *testing.T) {
 	}
 
 	privateValue, _ := jwk.PublicValue(public)
-	privateValue["d"], _ = base64.Encode(private.Seed())
+	privateValue["d"] = base64url.Encode(private.Seed())
 	for name, set := range map[string]*jwk.Set{
 		"private":   {Keys: []jwk.Value{privateValue}},
 		"symmetric": {Keys: []jwk.Value{{"kty": "oct", "k": "AAAA"}}},

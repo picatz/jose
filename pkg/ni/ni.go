@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 )
 
 // ErrFormat means a string is not a supported ni URI.
@@ -99,7 +99,7 @@ func Parse(s string) (URI, error) {
 	if !ok {
 		return URI{}, fmt.Errorf("%w: unsupported algorithm %q", ErrFormat, name)
 	}
-	digest, err := base64.Decode(value)
+	digest, err := base64url.Decode(value)
 	if err != nil || strings.ContainsRune(value, '=') {
 		return URI{}, fmt.Errorf("%w: value is not unpadded base64url", ErrFormat)
 	}
@@ -116,10 +116,7 @@ func (u URI) String() string {
 	if err != nil {
 		return ""
 	}
-	value, err := base64.Encode(u.Digest)
-	if err != nil {
-		return ""
-	}
+	value := base64url.Encode(u.Digest)
 	return "ni://" + u.Authority + "/" + name + ";" + value
 }
 

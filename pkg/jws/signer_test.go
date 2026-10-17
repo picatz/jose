@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -68,7 +68,7 @@ func TestSignWithOpaqueSigner(t *testing.T) {
 		{jwa.EdDSA, edKey},
 	}
 	for _, tc := range cases {
-		t.Run(tc.alg, func(t *testing.T) {
+		t.Run(string(tc.alg), func(t *testing.T) {
 			payload := []byte(`{"hello":"hardware"}`)
 			signed, err := jws.New(jws.Header{header.Algorithm: tc.alg}, payload, opaqueSigner{tc.signer})
 			if err != nil {
@@ -273,9 +273,5 @@ func TestCookbookSignatures(t *testing.T) {
 
 func mustEncode(t *testing.T, b []byte) string {
 	t.Helper()
-	s, err := base64.Encode(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s
+	return base64url.Encode(b)
 }

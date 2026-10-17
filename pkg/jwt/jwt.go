@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
@@ -31,7 +31,7 @@ var ErrInvalidToken = errors.New("jwt: invalid token")
 //	}
 //
 // https://www.rfc-editor.org/rfc/rfc7515.html#section-3.3
-const Type header.ParameterName = "JWT"
+const Type string = "JWT"
 
 // Token is a decoded JSON Web Token, a string representing a
 // set of claims as a JSON object that is encoded in a JWS or
@@ -109,7 +109,7 @@ func newToken(params header.Parameters, claims ClaimsSet, key any) (*Token, erro
 	}
 
 	// An unsecured JWT (RFC 7519 §6) is never minted: anyone could forge one.
-	if alg, _ := params[header.Algorithm].(string); alg == jwa.None {
+	if alg, _ := params.Algorithm(); alg == jwa.None {
 		return nil, fmt.Errorf("cannot create an unsecured token with alg %q", jwa.None)
 	}
 
@@ -212,10 +212,7 @@ func (t *Token) computeString() (string, error) {
 		return "", fmt.Errorf("failed to marshal header: %w", err)
 	}
 
-	header, err := base64.Encode(headerBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode header: %w", err)
-	}
+	header := base64url.Encode(headerBytes)
 	b.WriteString(header)
 	b.WriteString(dot)
 
@@ -225,18 +222,12 @@ func (t *Token) computeString() (string, error) {
 		return "", fmt.Errorf("failed to marshal claims: %w", err)
 	}
 
-	claims, err := base64.Encode(claimsBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode claims: %w", err)
-	}
+	claims := base64url.Encode(claimsBytes)
 	b.WriteString(claims)
 
 	if len(t.Signature) != 0 {
 		b.WriteString(dot)
-		signature, err := base64.Encode(t.Signature)
-		if err != nil {
-			return "", fmt.Errorf("failed to encode signature: %w", err)
-		}
+		signature := base64url.Encode(t.Signature)
 		b.WriteString(signature)
 	}
 
@@ -321,7 +312,7 @@ func parseString(input string) (*Token, error) {
 	}
 
 	// Next, we decode the header base64 content.
-	b, err := base64.Decode(parts[0])
+	b, err := base64url.Decode(parts[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JOSE header base64: %w", err)
 	}
@@ -352,7 +343,7 @@ func parseString(input string) (*Token, error) {
 	}
 
 	// Next, we decode the claims base64 content.
-	b, err = base64.Decode(parts[1])
+	b, err = base64url.Decode(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode claims base64: %w", err)
 	}
@@ -481,7 +472,7 @@ func parseString(input string) (*Token, error) {
 	// For "none" algorithm, the signature part may be empty
 	var sigBytes []byte
 	if parts[2] != "" {
-		sigBytes, err = base64.Decode(parts[2])
+		sigBytes, err = base64url.Decode(parts[2])
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode signature base64: %w", err)
 		}

@@ -56,7 +56,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
@@ -67,40 +67,40 @@ import (
 // https://datatracker.ietf.org/doc/html/rfc7516#section-4.1
 const (
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.1
-	Algorithm header.ParameterName = "alg"
+	Algorithm string = "alg"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.2
-	EncryptionAlgorithm header.ParameterName = "enc"
+	EncryptionAlgorithm string = "enc"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.3
-	CompressionAlgorithm header.ParameterName = "zip"
+	CompressionAlgorithm string = "zip"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.4
-	JWKSetURL header.ParameterName = "jku"
+	JWKSetURL string = "jku"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.5
-	JSONWebKey header.ParameterName = "jwk"
+	JSONWebKey string = "jwk"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.6
-	KeyID header.ParameterName = "kid"
+	KeyID string = "kid"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.7
-	X509URL header.ParameterName = "x5u"
+	X509URL string = "x5u"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.8
-	X509CertificateChain header.ParameterName = "x5c"
+	X509CertificateChain string = "x5c"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.9
-	X509CertificateSHA1Thumbprint header.ParameterName = "x5t"
+	X509CertificateSHA1Thumbprint string = "x5t"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.10
-	X509CertificateSHA256Thumbprint header.ParameterName = "x5t#S256"
+	X509CertificateSHA256Thumbprint string = "x5t#S256"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.11
-	Type header.ParameterName = "typ"
+	Type string = "typ"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.12
-	ContentType header.ParameterName = "cty"
+	ContentType string = "cty"
 	// https://datatracker.ietf.org/doc/html/rfc7516#section-4.1.13
-	Critical header.ParameterName = "crit"
+	Critical string = "crit"
 
 	// EphemeralPublicKey ("epk") carries the sender's ephemeral ECDH key.
 	// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.6.1.1
-	EphemeralPublicKey header.ParameterName = "epk"
+	EphemeralPublicKey string = "epk"
 	// AgreementPartyUInfo ("apu") and AgreementPartyVInfo ("apv") are
 	// base64url-encoded Concat KDF inputs.
 	// https://www.rfc-editor.org/rfc/rfc7518.html#section-4.6.1.2
-	AgreementPartyUInfo header.ParameterName = "apu"
-	AgreementPartyVInfo header.ParameterName = "apv"
+	AgreementPartyUInfo string = "apu"
+	AgreementPartyVInfo string = "apv"
 )
 
 var (
@@ -150,12 +150,12 @@ type Message struct {
 
 // Algorithm returns the "alg" header parameter.
 func (m *Message) Algorithm() (jwa.Algorithm, error) {
-	return header.Get[string](m.Header, Algorithm)
+	return m.Header.Algorithm()
 }
 
 // Encryption returns the "enc" header parameter.
 func (m *Message) Encryption() (jwa.ContentEncryption, error) {
-	return header.Get[string](m.Header, EncryptionAlgorithm)
+	return m.Header.EncryptionAlgorithm()
 }
 
 func decodeSegment(s, name string, required bool) ([]byte, error) {
@@ -165,7 +165,7 @@ func decodeSegment(s, name string, required bool) ([]byte, error) {
 		}
 		return nil, nil
 	}
-	b, err := base64.Decode(s)
+	b, err := base64url.Decode(s)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrMalformed, name, err)
 	}
@@ -176,7 +176,7 @@ func encodeSegment(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	s, _ := base64.Encode(b)
+	s := base64url.Encode(b)
 	return s
 }
 
@@ -332,9 +332,9 @@ func recoverContentKey(alg jwa.Algorithm, enc jwa.ContentEncryption, size int, k
 			if len(encryptedKey) != 0 {
 				return nil, fmt.Errorf("%w: %q must have an empty encrypted key", ErrMalformed, alg)
 			}
-			return concatKDF(z, enc, apu, apv, size), nil
+			return concatKDF(z, string(enc), apu, apv, size), nil
 		}
-		kek := concatKDF(z, alg, apu, apv, keyWrapSize(alg))
+		kek := concatKDF(z, string(alg), apu, apv, keyWrapSize(alg))
 		return unwrapContentKey(kek, encryptedKey, size)
 	case jwa.RSAOAEP, jwa.RSAOAEP256:
 		decrypter, ok := key.(crypto.Decrypter)
@@ -486,11 +486,11 @@ func Encrypt(h header.Parameters, plaintext []byte, key any) (string, error) {
 	for name, value := range h {
 		protectedHeader[name] = value
 	}
-	alg, err := header.Get[string](protectedHeader, Algorithm)
+	alg, err := protectedHeader.Algorithm()
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
-	enc, err := header.Get[string](protectedHeader, EncryptionAlgorithm)
+	enc, err := protectedHeader.EncryptionAlgorithm()
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
@@ -598,9 +598,9 @@ func manageKey(alg jwa.Algorithm, enc jwa.ContentEncryption, key any, h header.P
 			return nil, nil, nil, err
 		}
 		if alg == jwa.ECDHES {
-			return concatKDF(z, enc, apu, apv, content.keySize), nil, epk, nil
+			return concatKDF(z, string(enc), apu, apv, content.keySize), nil, epk, nil
 		}
-		kek := concatKDF(z, alg, apu, apv, keyWrapSize(alg))
+		kek := concatKDF(z, string(alg), apu, apv, keyWrapSize(alg))
 		if err := newCEK(); err != nil {
 			return nil, nil, nil, err
 		}

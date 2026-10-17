@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwe"
@@ -100,7 +100,7 @@ func TestCookbookDecrypt(t *testing.T) {
 			if string(plaintext) != vector.Input.Plaintext {
 				t.Fatal("plaintext mismatch")
 			}
-			if alg, _ := message.Algorithm(); alg != vector.Input.Alg {
+			if alg, _ := message.Algorithm(); string(alg) != vector.Input.Alg {
 				t.Fatalf("alg = %s", alg)
 			}
 
@@ -156,7 +156,7 @@ func TestRoundTripEveryAlgorithm(t *testing.T) {
 	}
 	for _, r := range recipients {
 		for _, enc := range encs {
-			t.Run(r.alg+"/"+enc, func(t *testing.T) {
+			t.Run(string(r.alg)+"/"+string(enc), func(t *testing.T) {
 				encKey, decKey := r.encrypt, r.decrypt
 				if r.alg == jwa.Direct || r.sharedSize > 0 {
 					size := r.sharedSize
@@ -201,18 +201,18 @@ func TestTamperingFailsUniformly(t *testing.T) {
 	}
 	parts := strings.Split(compact, ".")
 	for i := 1; i < 5; i++ {
-		b, _ := base64.Decode(parts[i])
+		b, _ := base64url.Decode(parts[i])
 		b[len(b)/2] ^= 0x80
 		tampered := append([]string(nil), parts...)
-		tampered[i], _ = base64.Encode(b)
+		tampered[i] = base64url.Encode(b)
 		if _, _, err := jwe.Decrypt(strings.Join(tampered, "."), key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
 			t.Errorf("part %d: err = %v, want ErrDecryption", i, err)
 		}
 	}
 
 	// The protected header is the AAD: re-encoding it breaks the tag.
-	h, _ := base64.Decode(parts[0])
-	reencoded, _ := base64.Encode(append([]byte(" "), h...))
+	h, _ := base64url.Decode(parts[0])
+	reencoded := base64url.Encode(append([]byte(" "), h...))
 	if _, _, err := jwe.Decrypt(reencoded+"."+strings.Join(parts[1:], "."), key, jwe.DecryptOptions{}); !errors.Is(err, jwe.ErrDecryption) {
 		t.Errorf("re-encoded header: err = %v, want ErrDecryption", err)
 	}
@@ -267,7 +267,7 @@ func TestRejectsUnsafeHeaders(t *testing.T) {
 		"private epk":   `{"alg":"ECDH-ES","enc":"A256GCM","epk":{"kty":"OKP","crv":"X25519","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","d":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}`,
 		"low-order epk": `{"alg":"ECDH-ES","enc":"A256GCM","epk":{"kty":"OKP","crv":"X25519","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}`,
 	} {
-		protected, _ := base64.Encode([]byte(h))
+		protected := base64url.Encode([]byte(h))
 		parts := strings.Split(compact, ".")
 		parts[0] = protected
 		x, _ := ecdh.X25519().GenerateKey(rand.Reader)

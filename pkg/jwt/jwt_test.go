@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"errors"
 	"strings"
@@ -14,7 +16,6 @@ import (
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/picatz/jose/pkg/keyutil"
 )
 
 // keyPair is a simple struct that holds a public and private key
@@ -25,8 +26,28 @@ type keyPair[P, S any] struct {
 }
 
 // keySource is a function that returns a public and private key pair
-// of any type. This works nicely with the keyutil package's functions.
+// of any type. This works with the testNew*KeyPair helpers below.
 type keySource[P, S any] func() (P, S, error)
+
+func testNewRSAKeyPair() (*rsa.PublicKey, *rsa.PrivateKey, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &key.PublicKey, key, nil
+}
+
+func testNewECDSAKeyPair() (*ecdsa.PublicKey, *ecdsa.PrivateKey, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &key.PublicKey, key, nil
+}
+
+func testNewEdDSAKeyPair() (ed25519.PublicKey, ed25519.PrivateKey, error) {
+	return ed25519.GenerateKey(rand.Reader)
+}
 
 // testNewKeyPair is a helper function that creates a new key pair
 // from the given source function. It returns the new key pair that
@@ -155,9 +176,9 @@ func verifyToken(v *jwt.Verifier, token string) error {
 }
 
 func TestParseAndVerify(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
-	ecdsaKeyPair := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
-	eddsaKeyPair := testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
+	ecdsaKeyPair := testNewKeyPair(t, testNewECDSAKeyPair)
+	eddsaKeyPair := testNewKeyPair(t, testNewEdDSAKeyPair)
 
 	rsaToken := testToken(t,
 		header.Parameters{
@@ -405,9 +426,9 @@ func TestParseAndVerify(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	var (
-		rsaKeyPair   = testNewKeyPair(t, keyutil.NewRSAKeyPair)
-		ecdsaKeyPair = testNewKeyPair(t, keyutil.NewECDSAKeyPair)
-		eddsaKeyPair = testNewKeyPair(t, keyutil.NewEdDSAKeyPair)
+		rsaKeyPair   = testNewKeyPair(t, testNewRSAKeyPair)
+		ecdsaKeyPair = testNewKeyPair(t, testNewECDSAKeyPair)
+		eddsaKeyPair = testNewKeyPair(t, testNewEdDSAKeyPair)
 		hmacKey      = testHMACSecretKey
 	)
 
@@ -544,7 +565,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewExpired(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 	tests := []struct {
 		name   string
@@ -613,7 +634,7 @@ func TestNewExpired(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
-	rsaKeyPair := testNewKeyPair(t, keyutil.NewRSAKeyPair)
+	rsaKeyPair := testNewKeyPair(t, testNewRSAKeyPair)
 
 	tests := []struct {
 		name      string

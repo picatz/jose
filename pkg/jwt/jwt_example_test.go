@@ -1,13 +1,14 @@
 package jwt_test
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
 	"fmt"
 	"time"
 
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/picatz/jose/pkg/keyutil"
 )
 
 var now = time.Time{} // time.Now() would be used in reality
@@ -41,7 +42,7 @@ func ExampleNew_symmetric() {
 }
 
 func ExampleNew_asymmetric() {
-	_, privateKey, _ := keyutil.NewRSAKeyPair()
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 
 	token, _ := jwt.New(
 		header.Parameters{

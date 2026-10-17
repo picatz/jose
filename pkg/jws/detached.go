@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/header"
 )
 
@@ -56,7 +56,7 @@ func ParseDetached(input string, payload []byte) (*Signature, error) {
 		return nil, errors.New(`invalid detached JWS: want "header..signature"`)
 	}
 
-	headerBytes, err := base64.Decode(encodedHeader)
+	headerBytes, err := base64url.Decode(encodedHeader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode header: %w", err)
 	}
@@ -78,9 +78,7 @@ func ParseDetached(input string, payload []byte) (*Signature, error) {
 		// every check it applies to any other compact JWS.
 		encodedPayload := ""
 		if len(payload) > 0 {
-			if encodedPayload, err = base64.Encode(payload); err != nil {
-				return nil, fmt.Errorf("failed to encode payload: %w", err)
-			}
+			encodedPayload = base64url.Encode(payload)
 		}
 		return Parse(encodedHeader + "." + encodedPayload + "." + signature)
 	}
@@ -91,7 +89,7 @@ func ParseDetached(input string, payload []byte) (*Signature, error) {
 	if err := h.ValidateCriticalHeaders([]string{header.Base64URLEncodePayload}); err != nil {
 		return nil, fmt.Errorf("critical header validation failed: %w", err)
 	}
-	sig, err := base64.Decode(signature)
+	sig, err := base64url.Decode(signature)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode signature: %w", err)
 	}

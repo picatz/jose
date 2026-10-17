@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/jwk"
 )
 
@@ -109,7 +109,7 @@ func GenerateString(value jwk.Value, h crypto.Hash) (string, error) {
 		return "", err
 	}
 
-	return base64.Encode(thumbprint)
+	return base64url.Encode(thumbprint), nil
 }
 
 // FromPublicKey returns the base64url SHA-256 JWK Thumbprint of a public

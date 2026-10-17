@@ -4,7 +4,7 @@ import (
 	"crypto"
 	"testing"
 
-	"github.com/picatz/jose/pkg/base64"
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
 )
@@ -24,10 +24,7 @@ func TestGenerate_EC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thumbprintString, err := base64.Encode(thumbprint)
-	if err != nil {
-		t.Fatalf("base64.Encode() error = %v", err)
-	}
+	thumbprintString := base64url.Encode(thumbprint)
 
 	if thumbprintString != "cn-I_WNMClehiVp51i_0VpOENW1upEerA8sEam5hn-s" {
 		t.Fatalf("thumbprintString = %q, want %q", thumbprintString, "cn-I_WNMClehiVp51i_0VpOENW1upEerA8sEam5hn-s")
@@ -50,10 +47,7 @@ func TestGenerate_RSA(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thumbprintString, err := base64.Encode(thumbprint)
-	if err != nil {
-		t.Fatalf("base64.Encode() error = %v", err)
-	}
+	thumbprintString := base64url.Encode(thumbprint)
 
 	if thumbprintString != "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs" {
 		t.Fatalf("thumbprintString = %q, want %q", thumbprintString, "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs")

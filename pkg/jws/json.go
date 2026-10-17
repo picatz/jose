@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
-	"github.com/picatz/jose/pkg/base64"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 )
@@ -391,7 +391,7 @@ func (s JSONSignature) encodedProtected() (string, error) {
 		return "", nil
 	}
 	if s.protected != "" {
-		if decoded, err := base64.Decode(s.protected); err == nil {
+		if decoded, err := base64url.Decode(s.protected); err == nil {
 			if parsed, err := parseHeaderStrict(decoded); err == nil && reflect.DeepEqual(parsed, s.Protected) {
 				return s.protected, nil
 			}
@@ -408,7 +408,7 @@ func (s JSONSignature) encodedProtected() (string, error) {
 // still holds those bytes, else a fresh encoding of Payload.
 func (j *JSON) encodedPayload() string {
 	if j.payload != "" {
-		if decoded, err := base64.Decode(j.payload); err == nil && bytes.Equal(decoded, j.Payload) {
+		if decoded, err := base64url.Decode(j.payload); err == nil && bytes.Equal(decoded, j.Payload) {
 			return j.payload
 		}
 	}
@@ -420,7 +420,7 @@ func encodeSegment(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	encoded, _ := base64.Encode(b)
+	encoded := base64url.Encode(b)
 	return encoded
 }
 
@@ -431,7 +431,7 @@ func decodeSegment(segment, what string) ([]byte, error) {
 	if strings.ContainsAny(segment, "=+/") {
 		return nil, fmt.Errorf("jws: %s is not unpadded base64url", what)
 	}
-	decoded, err := base64.Decode(segment)
+	decoded, err := base64url.Decode(segment)
 	if err != nil {
 		return nil, fmt.Errorf("jws: decode %s: %w", what, err)
 	}

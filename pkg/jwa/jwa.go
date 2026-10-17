@@ -5,8 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rsa"
 	"errors"
-	"fmt"
-	"slices"
 )
 
 var (
@@ -56,7 +54,10 @@ type SigningKey interface {
 // encrypting a JWS or JWE object respectively.
 //
 // https://datatracker.ietf.org/doc/html/rfc7518#section-3.1
-type Algorithm = string
+//
+// It is a defined string type, so a bare string must be converted explicitly,
+// and an untyped constant such as "RS256" converts implicitly.
+type Algorithm string
 
 // HMAC with SHA-2 Functions
 //
@@ -140,33 +141,8 @@ const EdDSA Algorithm = "EdDSA"
 //
 // The Go standard library has no secp256k1 curve, and this module takes no
 // dependencies, so ES256K is named only so callers can recognize it.
-// [ValidateAlgorithm] rejects it, and signing or verifying with it fails.
+// no method here reports it as supported, and signing or verifying with it
+// fails.
 //
 // https://www.rfc-editor.org/rfc/rfc8812#section-3.2
 const ES256K Algorithm = "ES256K"
-
-// knownAlgorithms is a slice of algorithms that are recognized and supported
-// by this library. This is used for algorithm validation to prevent
-// algorithm confusion attacks. Note that "none" is included as a known
-// algorithm but provides no cryptographic protection.
-var knownAlgorithms = []Algorithm{
-	HS256, HS384, HS512,
-	RS256, RS384, RS512,
-	PS256, PS384, PS512,
-	ES256, ES384, ES512,
-	EdDSA, None,
-}
-
-// ValidateAlgorithm checks if an algorithm is known/supported and that
-// it is included in the allowed algorithms list.
-func ValidateAlgorithm(alg Algorithm, allowedAlgs []Algorithm) error {
-	if !slices.Contains(knownAlgorithms, alg) {
-		return fmt.Errorf("%w: %q is not a known algorithm", ErrUnknownAlgorithm, alg)
-	}
-
-	if !slices.Contains(allowedAlgs, alg) {
-		return fmt.Errorf("%w: %q is not allowed", ErrAlgorithmNotAllowed, alg)
-	}
-
-	return nil
-}

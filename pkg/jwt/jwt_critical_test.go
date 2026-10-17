@@ -7,7 +7,6 @@ import (
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
-	"github.com/picatz/jose/pkg/keyutil"
 )
 
 // TestCriticalHeaderValidation tests RFC 7515 section 4.1.11 critical header
@@ -15,7 +14,7 @@ import (
 // [jwt.Verifier.Critical], or that is malformed, is refused before any
 // signature is checked.
 func TestCriticalHeaderValidation(t *testing.T) {
-	keys := testNewKeyPair(t, keyutil.NewECDSAKeyPair)
+	keys := testNewKeyPair(t, testNewECDSAKeyPair)
 	claims := jwt.ClaimsSet{jwt.Subject: "test"}
 
 	// signed returns a validly signed token with extra header parameters.
