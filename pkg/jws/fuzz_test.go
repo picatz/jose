@@ -3,6 +3,7 @@ package jws_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,16 +74,6 @@ func FuzzParse(f *testing.F) {
 	})
 }
 
-// FuzzParseDetached checks that ParseDetached never panics on any token
-// and payload pair.
-func FuzzParseDetached(f *testing.F) {
-	f.Add("eyJhbGciOiJIUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..A5dxf2s96_n5FLueVuW1Z_vh161FwXZC4YLPff6dmDY", []byte("$.02"))
-	f.Add("eyJhbGciOiJIUzI1NiJ9..5mvfOroL-g7HyqJoozehmsaqmvTYGEq5jTI1gVvoEoQ", []byte("$.02"))
-	f.Fuzz(func(t *testing.T, input string, payload []byte) {
-		_, _ = jws.ParseDetached(input, payload)
-	})
-}
-
 // FuzzParseJSON checks that ParseJSON never panics and that whatever it
 // accepts serializes back to something it accepts with the same payload
 // and signature count.
@@ -106,6 +97,37 @@ func FuzzParseJSON(f *testing.F) {
 		}
 		if !bytes.Equal(again.Payload, parsed.Payload) || len(again.Signatures) != len(parsed.Signatures) {
 			t.Fatal("round trip changed the payload or the signature count")
+		}
+	})
+}
+
+// FuzzParseDetached checks that ParseDetached never panics, that a parsed
+// detached JWS serializes back to the input, and that Verify only ever
+// fails with one of the package sentinels.
+func FuzzParseDetached(f *testing.F) {
+	f.Add("eyJhbGciOiJIUzI1NiJ9..5mvfOroL-g7HyqJoozehmsaqmvTYGEq5jTI1gVvoEoQ", []byte("$.02"))
+	f.Add("eyJhbGciOiJIUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..A5dxf2s96_n5FLueVuW1Z_vh161FwXZC4YLPff6dmDY", []byte("$.02"))
+	f.Add("eyJhbGciOiJIUzI1NiIsImtpZCI6IjAxOGMwYWU1LTRkOWItNDcxYi1iZmQ2LWVlZjMxNGJjNzAzNyJ9..s0h6KThzkfBBBkLspW1h84VsJZFTsPPqMDA7g1Md7p0", []byte("payload"))
+	f.Add("eyJhbGciOiJub25lIn0..AA", []byte(""))
+	f.Add("a..b", []byte(nil))
+	f.Fuzz(func(t *testing.T, input string, payload []byte) {
+		signed, err := jws.ParseDetached(input, payload)
+		if err != nil {
+			if !errors.Is(err, jws.ErrFormat) && !errors.Is(err, jws.ErrAlgorithm) {
+				t.Fatalf("ParseDetached(%q) = %v, want ErrFormat or ErrAlgorithm", input, err)
+			}
+			return
+		}
+		got, err := signed.Detached()
+		if err != nil {
+			t.Fatalf("Detached() error = %v", err)
+		}
+		if got != input {
+			t.Fatalf("Detached() = %q, want the input %q", got, input)
+		}
+		err = signed.Verify([]byte("fuzz-secret-key-that-is-long-enough-for-hmac-512-algorithms!!"))
+		if err != nil && !errors.Is(err, jws.ErrSignature) && !errors.Is(err, jws.ErrAlgorithm) && !errors.Is(err, jws.ErrFormat) {
+			t.Fatalf("Verify() = %v, want a package sentinel", err)
 		}
 	})
 }

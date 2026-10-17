@@ -68,15 +68,15 @@ type Signature struct {
 
 // New creates a new JWS token with the given header, payload, and signs it
 // with the provided key.
-func New(header Header, payload []byte, key any) (*Signature, error) {
+func New(params Header, payload []byte, key any) (*Signature, error) {
 	token := &Signature{
-		Header:  header,
+		Header:  params,
 		Payload: payload,
 	}
 
 	_, err := token.Sign(key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign JWS token: %w", err)
+		return nil, context(err, "sign")
 	}
 
 	return token, nil
@@ -109,52 +109,52 @@ func ParseCritical(input string, understood ...string) (*Signature, error) {
 
 func parse(input string, understood []string) (*Signature, error) {
 	if len(input) == 0 {
-		return nil, fmt.Errorf("empty JWS string")
+		return nil, fail(ErrFormat, "empty JWS string")
 	}
 
 	if dotCount := strings.Count(input, "."); dotCount != 2 {
-		return nil, fmt.Errorf("invalid JWS format: expected 2 dots, got %d", dotCount)
+		return nil, fail(ErrFormat, "invalid JWS format: expected 2 dots, got %d", dotCount)
 	}
 
 	parts := strings.SplitN(input, ".", 3)
 	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid JWS format: expected 3 parts, got %d", len(parts))
+		return nil, fail(ErrFormat, "invalid JWS format: expected 3 parts, got %d", len(parts))
 	}
 
 	// Decode header with strict validation
 	headerBytes, err := base64url.Decode(parts[0])
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode header: %w", err)
+		return nil, fail(ErrFormat, "failed to decode header: %w", err)
 	}
 
 	// Ensure header is valid UTF-8
 	if !utf8.Valid(headerBytes) {
-		return nil, fmt.Errorf("header is not valid UTF-8")
+		return nil, fail(ErrFormat, "header is not valid UTF-8")
 	}
 
 	// Parse header with strict JSON validation (includes UTF-8 validation)
-	header, err := parseHeaderStrict(headerBytes)
+	h, err := parseHeaderStrict(headerBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse header: %w", err)
+		return nil, fail(ErrFormat, "failed to parse header: %w", err)
 	}
 
 	// Validate required algorithm parameter
-	alg, err := header.Algorithm()
+	alg, err := h.Algorithm()
 	if err != nil {
-		return nil, fmt.Errorf("missing or invalid algorithm parameter: %w", err)
+		return nil, fail(ErrAlgorithm, "missing or invalid algorithm parameter: %w", err)
 	}
 
 	// An unencoded payload ("b64": false) is accepted only by ParseDetached,
 	// so a caller has to opt in to RFC 7797.
-	if unencoded, err := unencodedPayload(header); err != nil {
+	if unencoded, err := unencodedPayload(h); err != nil {
 		return nil, err
 	} else if unencoded {
-		return nil, fmt.Errorf("unencoded payload (%q false) needs ParseDetached", "b64")
+		return nil, fail(ErrFormat, "unencoded payload (%q false) needs ParseDetached", "b64")
 	}
 
 	// Process critical header parameters per RFC 7515 Section 4.1.11
-	if err := processCriticalHeaders(header, understood...); err != nil {
-		return nil, fmt.Errorf("critical header validation failed: %w", err)
+	if err := processCriticalHeaders(h, understood...); err != nil {
+		return nil, fail(ErrFormat, "critical header validation failed: %w", err)
 	}
 
 	// Decode payload (can be empty)
@@ -164,7 +164,7 @@ func parse(input string, understood []string) (*Signature, error) {
 	} else {
 		payload, err = base64url.Decode(parts[1])
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode payload: %w", err)
+			return nil, fail(ErrFormat, "failed to decode payload: %w", err)
 		}
 	}
 
@@ -173,17 +173,17 @@ func parse(input string, understood []string) (*Signature, error) {
 	if parts[2] != "" {
 		signature, err = base64url.Decode(parts[2])
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode signature: %w", err)
+			return nil, fail(ErrFormat, "failed to decode signature: %w", err)
 		}
 	}
 
 	// RFC 7515: Validate signature length constraints for "none" algorithm
 	if alg == jwa.None && len(signature) != 0 {
-		return nil, fmt.Errorf("signature must be empty for algorithm %q", alg)
+		return nil, fail(ErrFormat, "signature must be empty for algorithm %q", alg)
 	}
 
 	token := &Signature{
-		Header:    header,
+		Header:    h,
 		Payload:   payload,
 		Signature: signature,
 		raw:       input,
@@ -284,8 +284,12 @@ func (t *Signature) signingInput() (string, error) {
 		return encodedHeader + "." + string(t.Payload), nil
 	}
 	if t.raw != "" {
-		if i := strings.LastIndexByte(t.raw, '.'); i > 0 {
-			return t.raw[:i], nil
+		// Keep the received header segment, but always encode Payload as
+		// it is now, so changing Payload after Parse cannot leave a stale
+		// signature verifying (decoding is canonical, so an unchanged
+		// Payload re-encodes to the received segment).
+		if i := strings.IndexByte(t.raw, '.'); i >= 0 {
+			return t.raw[:i] + "." + base64url.Encode(t.Payload), nil
 		}
 	}
 
@@ -310,6 +314,11 @@ func (t *Signature) signingInput() (string, error) {
 // Sign computes and sets the signature for the JWS token using the given key.
 // The algorithm is determined by the "alg" header parameter.
 //
+// Sign always signs the current Header and Payload. It discards the cached
+// serialization a parsed token arrived with (and the received protected
+// header of a detached one), so [Signature.String] afterwards reflects the
+// re-signed token, not the original input.
+//
 // Asymmetric algorithms accept any [crypto.Signer] whose public key matches
 // the algorithm, so hardware-backed keys (PIV, TPM, Secure Enclave, KMS) sign
 // exactly like in-memory keys:
@@ -325,7 +334,7 @@ func (t *Signature) signingInput() (string, error) {
 func (t *Signature) Sign(key any) ([]byte, error) {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
-		return nil, fmt.Errorf("missing or invalid algorithm in header: %w", err)
+		return nil, fail(ErrAlgorithm, "missing or invalid algorithm in header: %w", err)
 	}
 
 	// Signing always covers the current Header and Payload, never the
@@ -337,7 +346,7 @@ func (t *Signature) Sign(key any) ([]byte, error) {
 		return nil, err
 	}
 	if t.unencoded && alg == jwa.None {
-		return nil, fmt.Errorf("alg %q cannot sign an unencoded payload", alg)
+		return nil, fail(ErrAlgorithm, "alg %q cannot sign an unencoded payload", alg)
 	}
 
 	signingInput, err := t.signingInput()
@@ -394,7 +403,7 @@ func (t *Signature) signInput(alg jwa.Algorithm, key any, signingInput string) (
 		// No signature for "none" algorithm
 		signature = nil
 	default:
-		return nil, fmt.Errorf("unsupported algorithm: %s", alg)
+		return nil, fail(ErrAlgorithm, "unsupported algorithm: %s", alg)
 	}
 
 	if err != nil {
@@ -406,6 +415,11 @@ func (t *Signature) signInput(alg jwa.Algorithm, key any, signingInput string) (
 // Verify verifies the JWS signature using the given key.
 // Returns nil if the signature is valid, error otherwise.
 //
+// For a parsed JWS the signature covers the protected header exactly as
+// received and Payload as it is now: changing Payload after [Parse]
+// makes Verify fail, while changing Header does not change what is
+// verified, so read header parameters only after Verify succeeds.
+//
 // An unsecured JWS ("alg" "none") never verifies: it carries no signature,
 // so accepting it would let anyone forge content
 // (https://www.rfc-editor.org/rfc/rfc8725.html#section-3.1). Callers that
@@ -413,15 +427,15 @@ func (t *Signature) signInput(alg jwa.Algorithm, key any, signingInput string) (
 func (t *Signature) Verify(key any) error {
 	alg, err := t.Header.Algorithm()
 	if err != nil {
-		return fmt.Errorf("missing or invalid algorithm in header: %w", err)
+		return fail(ErrAlgorithm, "missing or invalid algorithm in header: %w", err)
 	}
 
 	if alg == jwa.None {
-		return fmt.Errorf("unsecured JWS (alg %q) has no signature to verify", alg)
+		return fail(ErrAlgorithm, "unsecured JWS (alg %q) has no signature to verify", alg)
 	}
 
 	if key == nil {
-		return fmt.Errorf("key is required for algorithm %q", alg)
+		return fail(ErrAlgorithm, "key is required for algorithm %q", alg)
 	}
 
 	signingInput, err := t.signingInput()
@@ -457,7 +471,7 @@ func (t *Signature) Verify(key any) error {
 	case jwa.EdDSA:
 		return t.eddsaVerify(key, signingInput)
 	default:
-		return fmt.Errorf("unsupported algorithm: %s", alg)
+		return fail(ErrAlgorithm, "unsupported algorithm: %s", alg)
 	}
 }
 
@@ -465,14 +479,15 @@ func (t *Signature) Verify(key any) error {
 // names (RFC 7515 §4) so every verifier reads the same "alg".
 func parseHeaderStrict(data []byte) (Header, error) {
 	if err := strictjson.CheckDuplicates(data); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+		return nil, fail(ErrFormat, "invalid JSON: %w", err)
 	}
-	var header Header
-	if err := json.Unmarshal(data, &header); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+	var h Header
+	if err := json.Unmarshal(data, &h); err != nil {
+		return nil, fail(ErrFormat, "invalid JSON: %w", err)
 	}
+	normalizeHeader(h)
 
-	return header, nil
+	return h, nil
 }
 
 // processCriticalHeaders implements RFC 7515 Section 4.1.11 critical header processing
@@ -494,17 +509,17 @@ func (t *Signature) hmacSign(hash crypto.Hash, key any, signingInput string) ([]
 	case string:
 		secretKey = []byte(keyTyped)
 	default:
-		return nil, fmt.Errorf("HMAC signing requires []byte or string key, got %T", key)
+		return nil, fail(ErrAlgorithm, "HMAC signing requires []byte or string key, got %T", key)
 	}
 
 	// Ensure the secret key is not empty
 	if len(secretKey) == 0 {
-		return nil, fmt.Errorf("HMAC secret key cannot be empty")
+		return nil, fail(ErrAlgorithm, "HMAC secret key cannot be empty")
 	}
 
 	// Validate HMAC key size per RFC 7518
 	if err := validateHMACKeySize(hash, secretKey); err != nil {
-		return nil, fmt.Errorf("HMAC key validation failed: %w", err)
+		return nil, fail(ErrAlgorithm, "HMAC key validation failed: %w", err)
 	}
 
 	if !hash.Available() {
@@ -523,7 +538,7 @@ func (t *Signature) hmacVerify(hash crypto.Hash, key any, signingInput string) e
 	}
 
 	if !hmac.Equal(t.Signature, expectedSig) {
-		return fmt.Errorf("HMAC signature verification failed")
+		return fail(ErrSignature, "HMAC signature verification failed")
 	}
 	return nil
 }
@@ -533,11 +548,11 @@ func signerFor[P crypto.PublicKey](key any, name string) (crypto.Signer, P, erro
 	var zero P
 	signer, ok := key.(crypto.Signer)
 	if !ok {
-		return nil, zero, fmt.Errorf("%s signing requires a crypto.Signer, got %T", name, key)
+		return nil, zero, fail(ErrAlgorithm, "%s signing requires a crypto.Signer, got %T", name, key)
 	}
 	public, ok := signer.Public().(P)
 	if !ok {
-		return nil, zero, fmt.Errorf("%s signing requires a %T public key, got %T", name, zero, signer.Public())
+		return nil, zero, fail(ErrAlgorithm, "%s signing requires a %T public key, got %T", name, zero, signer.Public())
 	}
 	return signer, public, nil
 }
@@ -562,7 +577,7 @@ func (t *Signature) rsaSign(hash crypto.Hash, key any, signingInput string) ([]b
 
 	// Validate RSA key size per RFC 7518
 	if err := validateRSAKeySize(publicKey); err != nil {
-		return nil, fmt.Errorf("RSA key validation failed: %w", err)
+		return nil, fail(ErrAlgorithm, "RSA key validation failed: %w", err)
 	}
 
 	sum, err := digest(hash, signingInput)
@@ -575,19 +590,22 @@ func (t *Signature) rsaSign(hash crypto.Hash, key any, signingInput string) ([]b
 func (t *Signature) rsaVerify(hash crypto.Hash, key any, signingInput string) error {
 	publicKey, ok := key.(*rsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("RSA verification requires *rsa.PublicKey, got %T", key)
+		return fail(ErrAlgorithm, "RSA verification requires *rsa.PublicKey, got %T", key)
 	}
 
 	// Validate RSA key size per RFC 7518
 	if err := validateRSAKeySize(publicKey); err != nil {
-		return fmt.Errorf("RSA key validation failed: %w", err)
+		return fail(ErrAlgorithm, "RSA key validation failed: %w", err)
 	}
 
 	sum, err := digest(hash, signingInput)
 	if err != nil {
 		return err
 	}
-	return rsa.VerifyPKCS1v15(publicKey, hash, sum, t.Signature)
+	if err := rsa.VerifyPKCS1v15(publicKey, hash, sum, t.Signature); err != nil {
+		return fail(ErrSignature, "RSA signature verification failed")
+	}
+	return nil
 }
 
 // RSA-PSS signing and verification
@@ -603,7 +621,7 @@ func (t *Signature) rsaPSSSign(hash crypto.Hash, key any, signingInput string) (
 
 	// Validate RSA key size per RFC 7518
 	if err := validateRSAKeySize(publicKey); err != nil {
-		return nil, fmt.Errorf("RSA key validation failed: %w", err)
+		return nil, fail(ErrAlgorithm, "RSA key validation failed: %w", err)
 	}
 
 	sum, err := digest(hash, signingInput)
@@ -616,19 +634,22 @@ func (t *Signature) rsaPSSSign(hash crypto.Hash, key any, signingInput string) (
 func (t *Signature) rsaPSSVerify(hash crypto.Hash, key any, signingInput string) error {
 	publicKey, ok := key.(*rsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("RSA-PSS verification requires *rsa.PublicKey, got %T", key)
+		return fail(ErrAlgorithm, "RSA-PSS verification requires *rsa.PublicKey, got %T", key)
 	}
 
 	// Validate RSA key size per RFC 7518
 	if err := validateRSAKeySize(publicKey); err != nil {
-		return fmt.Errorf("RSA key validation failed: %w", err)
+		return fail(ErrAlgorithm, "RSA key validation failed: %w", err)
 	}
 
 	sum, err := digest(hash, signingInput)
 	if err != nil {
 		return err
 	}
-	return rsa.VerifyPSS(publicKey, hash, sum, t.Signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash})
+	if err := rsa.VerifyPSS(publicKey, hash, sum, t.Signature, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash}); err != nil {
+		return fail(ErrSignature, "RSA-PSS signature verification failed")
+	}
+	return nil
 }
 
 // ecdsaCurve returns the only curve each ECDSA algorithm may use.
@@ -643,7 +664,7 @@ func ecdsaCurve(hash crypto.Hash) (elliptic.Curve, error) {
 	case crypto.SHA512:
 		return elliptic.P521(), nil
 	default:
-		return nil, fmt.Errorf("unsupported ECDSA hash %v", hash)
+		return nil, fail(ErrAlgorithm, "unsupported ECDSA hash %v", hash)
 	}
 }
 
@@ -653,7 +674,7 @@ func checkECDSACurve(hash crypto.Hash, publicKey *ecdsa.PublicKey) error {
 		return err
 	}
 	if publicKey.Curve != want {
-		return fmt.Errorf("ECDSA with %v requires curve %s, got %s", hash, want.Params().Name, curveName(publicKey.Curve))
+		return fail(ErrAlgorithm, "ECDSA with %v requires curve %s, got %s", hash, want.Params().Name, curveName(publicKey.Curve))
 	}
 	return nil
 }
@@ -709,7 +730,7 @@ func (t *Signature) ecdsaSign(hash crypto.Hash, key any, signingInput string) ([
 func (t *Signature) ecdsaVerify(hash crypto.Hash, key any, signingInput string) error {
 	publicKey, ok := key.(*ecdsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("ECDSA verification requires *ecdsa.PublicKey, got %T", key)
+		return fail(ErrAlgorithm, "ECDSA verification requires *ecdsa.PublicKey, got %T", key)
 	}
 	if err := checkECDSACurve(hash, publicKey); err != nil {
 		return err
@@ -718,7 +739,7 @@ func (t *Signature) ecdsaVerify(hash crypto.Hash, key any, signingInput string) 
 	// Determine expected signature length
 	keyBytes := (publicKey.Curve.Params().BitSize + 7) / 8
 	if len(t.Signature) != 2*keyBytes {
-		return fmt.Errorf("invalid ECDSA signature length: expected %d, got %d", 2*keyBytes, len(t.Signature))
+		return fail(ErrSignature, "invalid ECDSA signature length: expected %d, got %d", 2*keyBytes, len(t.Signature))
 	}
 
 	// Split signature into r and s
@@ -731,7 +752,7 @@ func (t *Signature) ecdsaVerify(hash crypto.Hash, key any, signingInput string) 
 	}
 
 	if !ecdsa.Verify(publicKey, sum, r, s) {
-		return fmt.Errorf("ECDSA signature verification failed")
+		return fail(ErrSignature, "ECDSA signature verification failed")
 	}
 	return nil
 }
@@ -741,7 +762,7 @@ func (t *Signature) ecdsaVerify(hash crypto.Hash, key any, signingInput string) 
 // https://www.rfc-editor.org/rfc/rfc8037.html#section-3.1
 func (t *Signature) eddsaSign(key any, signingInput string) ([]byte, error) {
 	if privateKey, ok := key.(ed25519.PrivateKey); ok && len(privateKey) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("invalid Ed25519 private key size: expected %d bytes, got %d bytes", ed25519.PrivateKeySize, len(privateKey))
+		return nil, fail(ErrAlgorithm, "invalid Ed25519 private key size: expected %d bytes, got %d bytes", ed25519.PrivateKeySize, len(privateKey))
 	}
 
 	signer, publicKey, err := signerFor[ed25519.PublicKey](key, "EdDSA")
@@ -749,7 +770,7 @@ func (t *Signature) eddsaSign(key any, signingInput string) ([]byte, error) {
 		return nil, err
 	}
 	if len(publicKey) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid Ed25519 public key size: expected %d bytes, got %d bytes", ed25519.PublicKeySize, len(publicKey))
+		return nil, fail(ErrAlgorithm, "invalid Ed25519 public key size: expected %d bytes, got %d bytes", ed25519.PublicKeySize, len(publicKey))
 	}
 
 	// Ed25519 signs the message itself; crypto.Hash(0) selects pure Ed25519.
@@ -766,16 +787,16 @@ func (t *Signature) eddsaSign(key any, signingInput string) ([]byte, error) {
 func (t *Signature) eddsaVerify(key any, signingInput string) error {
 	publicKey, ok := key.(ed25519.PublicKey)
 	if !ok {
-		return fmt.Errorf("EdDSA verification requires ed25519.PublicKey, got %T", key)
+		return fail(ErrAlgorithm, "EdDSA verification requires ed25519.PublicKey, got %T", key)
 	}
 
 	// Validate Ed25519 public key size
 	if len(publicKey) != ed25519.PublicKeySize {
-		return fmt.Errorf("invalid Ed25519 public key size: expected %d bytes, got %d bytes", ed25519.PublicKeySize, len(publicKey))
+		return fail(ErrAlgorithm, "invalid Ed25519 public key size: expected %d bytes, got %d bytes", ed25519.PublicKeySize, len(publicKey))
 	}
 
 	if !ed25519.Verify(publicKey, []byte(signingInput), t.Signature) {
-		return fmt.Errorf("EdDSA signature verification failed")
+		return fail(ErrSignature, "EdDSA signature verification failed")
 	}
 	return nil
 }
@@ -795,11 +816,11 @@ func validateRSAKeySize(key any) error {
 	case *rsa.PrivateKey:
 		keySize = rsaKey.Size()
 	default:
-		return fmt.Errorf("invalid RSA key type: %T", key)
+		return fail(ErrAlgorithm, "invalid RSA key type: %T", key)
 	}
 
 	if keySize < minKeySizeBytes {
-		return fmt.Errorf("RSA key size %d bytes (%d bits) is below minimum required %d bytes (%d bits) per RFC 7518",
+		return fail(ErrAlgorithm, "RSA key size %d bytes (%d bits) is below minimum required %d bytes (%d bits) per RFC 7518",
 			keySize, keySize*8, minKeySizeBytes, minKeySize)
 	}
 
@@ -818,65 +839,23 @@ func validateHMACKeySize(hash crypto.Hash, key []byte) error {
 	case crypto.SHA512:
 		minSize = 64 // 512 bits
 	default:
-		return fmt.Errorf("unsupported hash algorithm for HMAC key validation: %v", hash)
+		return fail(ErrAlgorithm, "unsupported hash algorithm for HMAC key validation: %v", hash)
 	}
 
 	if len(key) < minSize {
-		return fmt.Errorf("HMAC key must be at least %d bytes for %v algorithm, got %d bytes", minSize, hash, len(key))
+		return fail(ErrAlgorithm, "HMAC key must be at least %d bytes for %v algorithm, got %d bytes", minSize, hash, len(key))
 	}
 
 	return nil
 }
 
-// SignHMAC performs HMAC signing with the given hash and key.
-// This method provides advanced validation per RFC 7518.
-func (t *Signature) SignHMAC(hash crypto.Hash, key any, signingInput string) ([]byte, error) {
-	return t.hmacSign(hash, key, signingInput)
-}
-
-// VerifyHMAC performs HMAC verification with the given hash and key.
-func (t *Signature) VerifyHMAC(hash crypto.Hash, key any, signingInput string) error {
-	return t.hmacVerify(hash, key, signingInput)
-}
-
-// SignRSA performs RSA PKCS1v15 signing with the given hash and key.
-// This method provides advanced validation per RFC 7518.
-func (t *Signature) SignRSA(hash crypto.Hash, key any, signingInput string) ([]byte, error) {
-	return t.rsaSign(hash, key, signingInput)
-}
-
-// VerifyRSA performs RSA PKCS1v15 verification with the given hash and key.
-func (t *Signature) VerifyRSA(hash crypto.Hash, key any, signingInput string) error {
-	return t.rsaVerify(hash, key, signingInput)
-}
-
-// SignRSAPSS performs RSA-PSS signing with the given hash and key.
-// This method provides advanced validation per RFC 7518.
-func (t *Signature) SignRSAPSS(hash crypto.Hash, key any, signingInput string) ([]byte, error) {
-	return t.rsaPSSSign(hash, key, signingInput)
-}
-
-// VerifyRSAPSS performs RSA-PSS verification with the given hash and key.
-func (t *Signature) VerifyRSAPSS(hash crypto.Hash, key any, signingInput string) error {
-	return t.rsaPSSVerify(hash, key, signingInput)
-}
-
-// SignECDSA performs ECDSA signing with the given hash and key.
-func (t *Signature) SignECDSA(hash crypto.Hash, key any, signingInput string) ([]byte, error) {
-	return t.ecdsaSign(hash, key, signingInput)
-}
-
-// VerifyECDSA performs ECDSA verification with the given hash and key.
-func (t *Signature) VerifyECDSA(hash crypto.Hash, key any, signingInput string) error {
-	return t.ecdsaVerify(hash, key, signingInput)
-}
-
-// SignEdDSA performs EdDSA signing with the given key.
-func (t *Signature) SignEdDSA(key any, signingInput string) ([]byte, error) {
-	return t.eddsaSign(key, signingInput)
-}
-
-// VerifyEdDSA performs EdDSA verification with the given key.
-func (t *Signature) VerifyEdDSA(key any, signingInput string) error {
-	return t.eddsaVerify(key, signingInput)
+// normalizeHeader gives a decoded header the same Go types a caller
+// building one by hand uses, so the two compare equal with
+// [reflect.DeepEqual]: "alg" becomes a [jwa.Algorithm] rather than the
+// string encoding/json produces. Other parameters keep the types
+// encoding/json gives them (numbers are float64, "crit" is []any).
+func normalizeHeader(h Header) {
+	if alg, ok := h[header.Algorithm].(string); ok {
+		h[header.Algorithm] = jwa.Algorithm(alg)
+	}
 }
