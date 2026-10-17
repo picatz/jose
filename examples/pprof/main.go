@@ -14,8 +14,10 @@ import (
 func main() {
 	const (
 		symmetricKeyID = "test"
-		symmetricKey   = "example-hs256-secret-of-32-bytes"
 	)
+
+	// A 32-byte secret, the minimum for HS256 (RFC 7518 section 3.2).
+	symmetricKey := []byte("example-hs256-secret-of-32-bytes")
 
 	token, err := jwt.New(
 		header.Parameters{
@@ -46,7 +48,7 @@ func main() {
 	tokenString := token.String()
 
 	verifier := &jwt.Verifier{
-		Keys:       jwt.Keys{{ID: symmetricKeyID, Algorithm: jwa.HS256, Public: []byte(symmetricKey)}},
+		Keys:       jwt.Keys{{ID: symmetricKeyID, Algorithm: jwa.HS256, Public: symmetricKey}},
 		Algorithms: []jwa.Algorithm{jwa.HS256},
 		Issuer:     "https://issuer.example",
 		Audience:   "https://api.example",
@@ -54,14 +56,14 @@ func main() {
 
 	for range 500000 {
 		// parse and verify the token
-		_, err := verifier.Verify(context.Background(), tokenString)
+		verified, err := verifier.Verify(context.Background(), tokenString)
 		if err != nil {
 			panic(err)
 		}
 
 		// check the claims
-		if token.Claims == nil {
-			panic("claims are nil")
+		if verified.Claims[jwt.Subject] != "1234567890" {
+			panic("unexpected subject")
 		}
 	}
 
