@@ -60,9 +60,11 @@
 //
 // [Policy.Root] verifies the root however the application already does,
 // so a chain can grow from any JWT: an OAuth access token, a token minted
-// with package jwt, or one checked against a JWKS. [RootKey] covers the
-// common case of one issuer key. [Grant.Holder] is the key thumbprint a
+// with package jwt, or one checked against a JWKS. [RootVerifier] reuses
+// the application's [jwt.Verifier], so the root passes the same issuer,
+// type, algorithm and key-set checks as any other token; [RootKey] covers
+// the simplest case of one issuer key. [Grant.Holder] is the key thumbprint a
 // DPoP proof must match (pass it as dpop.Request.Thumbprint), and
 // [Policy.Caveat] is where an application evaluates caveats in whatever
-// language it likes.
+// language it likes, with the request's context.
 package jwtchain

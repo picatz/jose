@@ -28,14 +28,14 @@ func TestLinkIssuedInTheFuture(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = f.policy().VerifyChain(c)
+			_, err = f.policy().VerifyChain(t.Context(), c)
 			if tc.ok != (err == nil) || err != nil && !errors.Is(err, jwtchain.ErrVerification) {
 				t.Fatalf("VerifyChain() error = %v, want ok=%v", err, tc.ok)
 			}
 			// Once the verifier's clock catches up, the link verifies.
 			later := f.policy()
 			later.Now = func() time.Time { return issued }
-			if _, err := later.VerifyChain(c); err != nil {
+			if _, err := later.VerifyChain(t.Context(), c); err != nil {
 				t.Fatalf("VerifyChain() at issue time: %v", err)
 			}
 		})

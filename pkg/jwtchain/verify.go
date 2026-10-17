@@ -1,6 +1,7 @@
 package jwtchain
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,17 +18,30 @@ import (
 // DefaultLeeway is the clock skew a zero [Policy] tolerates.
 const DefaultLeeway = 30 * time.Second
 
+// RootFunc verifies a chain's root token and returns its claims. Verify the
+// root the way the application verifies any token from its issuer:
+// [RootVerifier] adapts a [jwt.Verifier], and [RootKey] covers a single
+// issuer key.
+type RootFunc func(ctx context.Context, root string) (jwt.ClaimsSet, error)
+
+// CaveatFunc decides whether a caveat holds for the request being served,
+// returning nil to accept it. [AcceptCaveats] accepts a fixed set; an
+// application with a policy language evaluates each caveat with it here.
+type CaveatFunc func(ctx context.Context, caveat string) error
+
 // Policy verifies chains. Root is required, and so is Audience unless
 // AnyAudience is set; every other field has a safe default.
 type Policy struct {
 	// Root verifies the root token and returns its claims. Verify it the
 	// way the application verifies any token from this issuer, including
 	// "iss" and "typ" checks: the chain is only as trustworthy as its
-	// root. [RootKey] covers a single issuer key. Root need not check
-	// "exp", "nbf" or "aud"; the Policy checks them for the whole chain.
+	// root. [RootVerifier] adapts a [jwt.Verifier], which checks the
+	// issuer, type and key set too; [RootKey] covers a single issuer key.
+	// Root need not check "exp", "nbf" or "aud"; the Policy checks them
+	// for the whole chain.
 	// Note that a root without "aud" is valid for every audience, so a
 	// link may narrow it to this verifier's: issue roots with "aud".
-	Root func(root string) (jwt.ClaimsSet, error)
+	Root RootFunc
 
 	// Audience is this verifier's identifier. The chain verifies only if
 	// what it allows, after every link has narrowed it, still names
@@ -48,7 +62,7 @@ type Policy struct {
 	// nil to accept it. Every caveat in the chain must be accepted. A nil
 	// Caveat accepts none, so a chain with caveats fails, as caveats must
 	// never be ignored. [AcceptCaveats] accepts a fixed set.
-	Caveat func(caveat string) error
+	Caveat CaveatFunc
 
 	// Algorithms lists the link signature algorithms accepted; nil means
 	// [DefaultAlgorithms]. Symmetric algorithms and "none" are always
@@ -185,7 +199,7 @@ func (g *Grant) Claims() (jwt.ClaimsSet, error) {
 }
 
 // Verify parses input and verifies it with [Policy.VerifyChain].
-func (p *Policy) Verify(input string) (*Grant, error) {
+func (p *Policy) Verify(ctx context.Context, input string) (*Grant, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
@@ -193,14 +207,14 @@ func (p *Policy) Verify(input string) (*Grant, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.VerifyChain(chain)
+	return p.VerifyChain(ctx, chain)
 }
 
 // VerifyChain verifies a parsed chain: the root with [Policy.Root], then
 // each link's signature against its parent's holder key and its claims
 // against what its parent allows, then the audience, the validity window
 // and every caveat.
-func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
+func (p *Policy) VerifyChain(ctx context.Context, c *Chain) (*Grant, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
@@ -232,7 +246,7 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 			}
 		}
 	}
-	root, err := p.Root(c.Root())
+	root, err := p.Root(ctx, c.Root())
 	if err != nil {
 		return nil, fmt.Errorf("%w: root: %w", ErrVerification, err)
 	}
@@ -274,7 +288,7 @@ func (p *Policy) VerifyChain(c *Chain) (*Grant, error) {
 		if p.Caveat == nil {
 			return nil, fmt.Errorf("%w: %q (no Caveat function is set)", ErrCaveat, caveat)
 		}
-		if err := p.Caveat(caveat); err != nil {
+		if err := p.Caveat(ctx, caveat); err != nil {
 			return nil, fmt.Errorf("%w: %q: %w", ErrCaveat, caveat, err)
 		}
 	}
@@ -305,14 +319,14 @@ func orDefault(n, fallback int) int {
 //
 // RootKey checks only the signature. Wrap it when the root's issuer, type
 // or other claims also need checking.
-func RootKey(key any, algorithms ...jwa.Algorithm) func(root string) (jwt.ClaimsSet, error) {
+func RootKey(key any, algorithms ...jwa.Algorithm) RootFunc {
 	allowed := slices.Clone(algorithms)
 	if len(allowed) == 0 {
 		if alg, err := jwa.ForKey(key); err == nil {
 			allowed = []jwa.Algorithm{alg}
 		}
 	}
-	return func(root string) (jwt.ClaimsSet, error) {
+	return func(_ context.Context, root string) (jwt.ClaimsSet, error) {
 		signature, err := jws.Parse(root)
 		if err != nil {
 			return nil, err
@@ -331,11 +345,30 @@ func RootKey(key any, algorithms ...jwa.Algorithm) func(root string) (jwt.Claims
 	}
 }
 
+// RootVerifier returns a [Policy.Root] function that verifies the root
+// with v, so a chain's root passes exactly the checks any other token from
+// that issuer does: key source, algorithms, "typ", "iss", "aud", "exp" and
+// the rest. v.Audience should be the Policy's Audience, since a root that
+// does not name this verifier cannot be narrowed into naming it. A root
+// typed as a link ([Type]) is refused whatever v.Types allows.
+func RootVerifier(v *jwt.Verifier) RootFunc {
+	return func(ctx context.Context, root string) (jwt.ClaimsSet, error) {
+		token, err := v.Verify(ctx, root)
+		if err != nil {
+			return nil, err
+		}
+		if typ, _ := token.Header[header.Type].(string); strings.EqualFold(typ, Type) {
+			return nil, errors.New("a link cannot be a root")
+		}
+		return token.Claims, nil
+	}
+}
+
 // AcceptCaveats returns a [Policy.Caveat] function that accepts exactly
 // the given caveats and no others.
-func AcceptCaveats(caveats ...string) func(caveat string) error {
+func AcceptCaveats(caveats ...string) CaveatFunc {
 	accepted := slices.Clone(caveats)
-	return func(caveat string) error {
+	return func(_ context.Context, caveat string) error {
 		if !slices.Contains(accepted, caveat) {
 			return errors.New("not accepted")
 		}

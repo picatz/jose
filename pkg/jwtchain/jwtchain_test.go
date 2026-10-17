@@ -1,7 +1,6 @@
 package jwtchain_test
 
 import (
-	"context"
 	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
@@ -131,7 +130,7 @@ func urn(t testing.TB, key crypto.Signer) string {
 
 func TestRootAlone(t *testing.T) {
 	f := newFixture(t)
-	v, err := f.policy().Verify(f.root)
+	v, err := f.policy().Verify(t.Context(), f.root)
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -164,7 +163,7 @@ func TestDeriveNarrowsAndVerifies(t *testing.T) {
 
 	policy := f.policy()
 	policy.Caveat = jwtchain.AcceptCaveats("path:/reports/*")
-	v, err := policy.Verify(two.String())
+	v, err := policy.Verify(t.Context(), two.String())
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -196,15 +195,15 @@ func TestDeriveNarrowsAndVerifies(t *testing.T) {
 	admin := f.policy()
 	admin.Audience = "https://admin.example"
 	admin.Caveat = policy.Caveat
-	if _, err := admin.Verify(two.String()); !errors.Is(err, jwtchain.ErrVerification) {
+	if _, err := admin.Verify(t.Context(), two.String()); !errors.Is(err, jwtchain.ErrVerification) {
 		t.Fatalf("Verify() for a dropped audience error = %v", err)
 	}
 	// Caveats are never ignored.
-	if _, err := f.policy().Verify(two.String()); !errors.Is(err, jwtchain.ErrCaveat) {
+	if _, err := f.policy().Verify(t.Context(), two.String()); !errors.Is(err, jwtchain.ErrCaveat) {
 		t.Fatalf("Verify() without Caveat error = %v, want ErrCaveat", err)
 	}
 	policy.Caveat = jwtchain.AcceptCaveats("something else")
-	if _, err := policy.Verify(two.String()); !errors.Is(err, jwtchain.ErrCaveat) {
+	if _, err := policy.Verify(t.Context(), two.String()); !errors.Is(err, jwtchain.ErrCaveat) {
 		t.Fatalf("Verify() with another caveat error = %v, want ErrCaveat", err)
 	}
 }
@@ -224,12 +223,12 @@ func TestEmbed(t *testing.T) {
 	if again.Links() != 2 || !slices.Equal(again.Tokens(), two.Tokens()) {
 		t.Fatalf("Parse(embedded) tokens differ")
 	}
-	if _, err := f.policy().Verify(single); !errors.Is(err, jwtchain.ErrBearer) {
+	if _, err := f.policy().Verify(t.Context(), single); !errors.Is(err, jwtchain.ErrBearer) {
 		t.Fatalf("Verify(bearer leaf) error = %v, want a refusal without AllowBearer", err)
 	}
 	bearer := f.policy()
 	bearer.AllowBearer = true
-	v, err := bearer.Verify(single)
+	v, err := bearer.Verify(t.Context(), single)
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -238,7 +237,7 @@ func TestEmbed(t *testing.T) {
 	}
 
 	// A presenter may also send the embedded parents explicitly.
-	if _, err := bearer.Verify(strings.Join(two.Tokens(), jwtchain.Separator)); err != nil {
+	if _, err := bearer.Verify(t.Context(), strings.Join(two.Tokens(), jwtchain.Separator)); err != nil {
 		t.Fatalf("Verify(redundant bundle) error = %v", err)
 	}
 
@@ -249,7 +248,7 @@ func TestEmbed(t *testing.T) {
 	if want := f.root + jwtchain.Separator + mixed.Leaf(); mixed.String() != want {
 		t.Fatalf("String() = %q, want root~leaf", mixed.String())
 	}
-	if _, err := bearer.Verify(mixed.String()); err != nil {
+	if _, err := bearer.Verify(t.Context(), mixed.String()); err != nil {
 		t.Fatalf("Verify(mixed) error = %v", err)
 	}
 }
@@ -311,7 +310,7 @@ func TestDeriveRefusals(t *testing.T) {
 		if _, err := jwtchain.Derive(c, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute)}, jwtchain.WithClock(clock)); err == nil {
 			t.Fatal("Derive() exceeded DefaultMaxLinks")
 		}
-		if _, err := f.policy().Verify(c.String()); err != nil {
+		if _, err := f.policy().Verify(t.Context(), c.String()); err != nil {
 			t.Fatalf("Verify() of DefaultMaxLinks links error = %v", err)
 		}
 	})
@@ -372,7 +371,7 @@ func TestVerifyRefusals(t *testing.T) {
 	}
 
 	// The forge itself makes a link that verifies.
-	if _, err := f.policy().Verify(link(good(), nil)); err != nil {
+	if _, err := f.policy().Verify(t.Context(), link(good(), nil)); err != nil {
 		t.Fatalf("Verify(forged good link) error = %v", err)
 	}
 
@@ -418,7 +417,7 @@ func TestVerifyRefusals(t *testing.T) {
 		"oversized":     strings.Repeat("A", jwtchain.DefaultMaxSize+1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := f.policy().Verify(input)
+			_, err := f.policy().Verify(t.Context(), input)
 			if err == nil {
 				t.Fatal("Verify() succeeded")
 			}
@@ -429,12 +428,12 @@ func TestVerifyRefusals(t *testing.T) {
 	t.Run("HS256 link", func(t *testing.T) {
 		input := link(good(), nil)
 		forged := f.root + jwtchain.Separator + forge(t, f.root, f.a, jwa.HS256, good(), nil)
-		if _, err := f.policy().Verify(forged); err == nil {
+		if _, err := f.policy().Verify(t.Context(), forged); err == nil {
 			t.Fatal("Verify() accepted an HS256 link")
 		}
 		policy := f.policy()
 		policy.Algorithms = []jwa.Algorithm{jwa.EdDSA}
-		if _, err := policy.Verify(input); err == nil {
+		if _, err := policy.Verify(t.Context(), input); err == nil {
 			t.Fatal("Verify() accepted an algorithm outside Policy.Algorithms")
 		}
 	})
@@ -445,25 +444,25 @@ func TestVerifyRefusals(t *testing.T) {
 		// The same link presented under another valid root does not match
 		// its digest.
 		swapped := other.root + input[len(f.root):]
-		if _, err := f.policy().Verify(swapped); err == nil {
+		if _, err := f.policy().Verify(t.Context(), swapped); err == nil {
 			t.Fatal("Verify() accepted a link under another root")
 		}
 		policy := f.policy()
 		policy.Root = jwtchain.RootKey(other.issuer.Public())
-		if _, err := policy.Verify(input); !errors.Is(err, jwtchain.ErrVerification) {
+		if _, err := policy.Verify(t.Context(), input); !errors.Is(err, jwtchain.ErrVerification) {
 			t.Fatalf("Verify() with the wrong issuer key error = %v", err)
 		}
 	})
 
 	t.Run("policy configuration", func(t *testing.T) {
-		if _, err := (&jwtchain.Policy{Audience: "x"}).Verify(f.root); err == nil {
+		if _, err := (&jwtchain.Policy{Audience: "x"}).Verify(t.Context(), f.root); err == nil {
 			t.Fatal("Verify() without Root succeeded")
 		}
-		if _, err := (&jwtchain.Policy{Root: jwtchain.RootKey(f.issuer.Public())}).Verify(f.root); err == nil {
+		if _, err := (&jwtchain.Policy{Root: jwtchain.RootKey(f.issuer.Public())}).Verify(t.Context(), f.root); err == nil {
 			t.Fatal("Verify() without Audience succeeded")
 		}
 		anyAudience := &jwtchain.Policy{Root: jwtchain.RootKey(f.issuer.Public()), AnyAudience: true, Now: clock}
-		if _, err := anyAudience.Verify(f.root); err != nil {
+		if _, err := anyAudience.Verify(t.Context(), f.root); err != nil {
 			t.Fatalf("Verify() with AnyAudience error = %v", err)
 		}
 	})
@@ -475,10 +474,10 @@ func TestVerifyRefusals(t *testing.T) {
 		}
 		policy := f.policy()
 		policy.MaxLinks = 2
-		if _, err := policy.Verify(c.String()); !errors.Is(err, jwtchain.ErrFormat) {
+		if _, err := policy.Verify(t.Context(), c.String()); !errors.Is(err, jwtchain.ErrFormat) {
 			t.Fatalf("Verify() over MaxLinks error = %v, want ErrFormat", err)
 		}
-		if _, err := policy.VerifyChain(c); !errors.Is(err, jwtchain.ErrFormat) {
+		if _, err := policy.VerifyChain(t.Context(), c); !errors.Is(err, jwtchain.ErrFormat) {
 			t.Fatalf("VerifyChain() over MaxLinks error = %v, want ErrFormat", err)
 		}
 	})
@@ -486,11 +485,11 @@ func TestVerifyRefusals(t *testing.T) {
 
 func TestRootKey(t *testing.T) {
 	f := newFixture(t)
-	if _, err := jwtchain.RootKey(f.issuer.Public(), jwa.ES256)(f.root); err == nil {
+	if _, err := jwtchain.RootKey(f.issuer.Public(), jwa.ES256)(t.Context(), f.root); err == nil {
 		t.Fatal("RootKey accepted an algorithm it was not given")
 	}
 	unsecured := "eyJhbGciOiJub25lIn0." + strings.Split(f.root, ".")[1] + "."
-	if _, err := jwtchain.RootKey(f.issuer.Public(), jwa.None)(unsecured); err == nil {
+	if _, err := jwtchain.RootKey(f.issuer.Public(), jwa.None)(t.Context(), unsecured); err == nil {
 		t.Fatal("RootKey accepted an unsecured root")
 	}
 
@@ -501,7 +500,7 @@ func TestRootKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := &jwtchain.Policy{Root: jwtchain.RootKey(secret, jwa.HS256), Audience: "https://api.example", AllowBearer: true, Now: clock}
-	if _, err := policy.Verify(signed.String()); err != nil {
+	if _, err := policy.Verify(t.Context(), signed.String()); err != nil {
 		t.Fatalf("Verify(HS256 root) error = %v", err)
 	}
 }
@@ -511,22 +510,16 @@ func TestRootFromPackageJWT(t *testing.T) {
 	f := newFixture(t)
 	c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Scope: []string{"read"}, Holder: f.b.Public()})
 	policy := f.policy()
-	policy.Root = func(root string) (jwt.ClaimsSet, error) {
-		verifier := &jwt.Verifier{
-			Keys:       jwt.Keys{{Public: f.issuer.Public().(ed25519.PublicKey)}},
-			Algorithms: []jwa.Algorithm{jwa.EdDSA},
-			Types:      []string{"at+jwt"},
-			Issuer:     "https://issuer.example",
-			Audience:   "https://api.example",
-			Now:        clock,
-		}
-		token, err := verifier.Verify(context.Background(), root)
-		if err != nil {
-			return nil, err
-		}
-		return token.Claims, nil
+	verifier := &jwt.Verifier{
+		Keys:       jwt.Keys{{Public: f.issuer.Public()}},
+		Algorithms: []jwa.Algorithm{jwa.EdDSA},
+		Types:      []string{"at+jwt"},
+		Issuer:     "https://issuer.example",
+		Audience:   "https://api.example",
+		Now:        clock,
 	}
-	v, err := policy.Verify(c.String())
+	policy.Root = jwtchain.RootVerifier(verifier)
+	v, err := policy.Verify(t.Context(), c.String())
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -547,7 +540,7 @@ func TestRootScopeRules(t *testing.T) {
 		t.Fatalf("Derive() adding scope to a scopeless root error = %v, want ErrBroadens", err)
 	}
 	c := derive(t, noScope, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: f.b.Public()})
-	v, err := f.policy().Verify(c.String())
+	v, err := f.policy().Verify(t.Context(), c.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,11 +550,11 @@ func TestRootScopeRules(t *testing.T) {
 
 	// A root without "aud" lets the first link choose one.
 	noAudience := parse(t, f.mintRoot(t, jwt.ClaimsSet{jwt.ExpirationTime: now.Add(time.Hour).Unix(), jwt.Confirmation: cnf}))
-	if _, err := f.policy().Verify(noAudience.String()); err == nil {
+	if _, err := f.policy().Verify(t.Context(), noAudience.String()); err == nil {
 		t.Fatal("Verify() accepted a chain that names no audience")
 	}
 	narrowed := derive(t, noAudience, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Audience: []string{"https://api.example"}, Holder: f.b.Public()})
-	if _, err := f.policy().Verify(narrowed.String()); err != nil {
+	if _, err := f.policy().Verify(t.Context(), narrowed.String()); err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
 }
@@ -578,7 +571,7 @@ func TestRootCaveatsAndJWKConfirmation(t *testing.T) {
 	c := derive(t, root, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Caveats: []string{"read-only"}, Holder: f.b.Public()})
 	policy := f.policy()
 	policy.Caveat = jwtchain.AcceptCaveats("tenant:acme", "read-only")
-	v, err := policy.Verify(c.String())
+	v, err := policy.Verify(t.Context(), c.String())
 	if err != nil {
 		t.Fatalf("Verify() error = %v", err)
 	}
@@ -594,7 +587,7 @@ func TestReissueWithLineage(t *testing.T) {
 		Scope:  []string{"read"},
 		Holder: f.b.Public(),
 	})
-	v, err := f.policy().Verify(c.String())
+	v, err := f.policy().Verify(t.Context(), c.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +602,7 @@ func TestReissueWithLineage(t *testing.T) {
 		t.Fatalf("Claims() = %v", claims)
 	}
 	reissued := f.mintRoot(t, claims)
-	again, err := f.policy().Verify(reissued)
+	again, err := f.policy().Verify(t.Context(), reissued)
 	if err != nil {
 		t.Fatalf("Verify(reissued) error = %v", err)
 	}
@@ -626,7 +619,7 @@ func TestReissueWithLineage(t *testing.T) {
 
 	// The re-issued root carries its lineage into the next chain.
 	next := derive(t, parse(t, reissued), f.b, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: f.c.Public()})
-	nv, err := f.policy().Verify(next.String())
+	nv, err := f.policy().Verify(t.Context(), next.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +650,7 @@ func FuzzParse(f *testing.F) {
 		if !slices.Equal(again.Tokens(), c.Tokens()) {
 			t.Fatal("String() lost tokens")
 		}
-		_, _ = fx.policy().VerifyChain(c)
+		_, _ = fx.policy().VerifyChain(t.Context(), c)
 	})
 }
 
@@ -692,7 +685,7 @@ func TestReviewRegressions(t *testing.T) {
 		alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 		idx := strings.IndexByte(alphabet, last)
 		mutated := leaf[:len(leaf)-1] + string(alphabet[idx^1])
-		if _, err := f.policy().Verify(f.root + jwtchain.Separator + mutated); err == nil {
+		if _, err := f.policy().Verify(t.Context(), f.root+jwtchain.Separator+mutated); err == nil {
 			t.Fatal("Verify() accepted a second spelling of the same link")
 		}
 	})
@@ -732,7 +725,7 @@ func TestReviewRegressions(t *testing.T) {
 			jwt.Confirmation:   cnf,
 			jwt.Actor:          map[string]any{"sub": "svc", "exp": 1},
 		})
-		g, err := f.policy().Verify(root)
+		g, err := f.policy().Verify(t.Context(), root)
 		if err != nil {
 			t.Fatalf("Verify() error = %v", err)
 		}
@@ -750,7 +743,7 @@ func TestReviewRegressions(t *testing.T) {
 		})
 		policy := f.policy()
 		policy.Caveat = jwtchain.AcceptCaveats("tenant:acme")
-		g, err := policy.Verify(c.String())
+		g, err := policy.Verify(t.Context(), c.String())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -772,8 +765,54 @@ func TestReviewRegressions(t *testing.T) {
 		// The garbage link would fail its signature check; expiry is
 		// reported first.
 		garbage := forge(t, f.root, f.b, jwa.EdDSA, map[string]any{jwt.Issuer: urn(t, f.b), jwt.ExpirationTime: now.Unix(), jwt.JWTID: "x"}, nil)
-		if _, err := policy.Verify(f.root + jwtchain.Separator + garbage); err == nil || !strings.Contains(err.Error(), "expired") {
+		if _, err := policy.Verify(t.Context(), f.root+jwtchain.Separator+garbage); err == nil || !strings.Contains(err.Error(), "expired") {
 			t.Fatalf("Verify() error = %v, want expired", err)
 		}
 	})
+}
+
+// RootVerifier applies every check of the jwt.Verifier to the root, and
+// never accepts a link as a root even if the Verifier's types would.
+func TestRootVerifier(t *testing.T) {
+	f := newFixture(t)
+	c := derive(t, parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: f.b.Public()})
+	verifier := func(mutate func(*jwt.Verifier)) jwtchain.RootFunc {
+		v := &jwt.Verifier{
+			Keys:     jwt.Keys{{Public: f.issuer.Public()}},
+			Types:    []string{"at+jwt"},
+			Issuer:   "https://issuer.example",
+			Audience: "https://api.example",
+			Now:      clock,
+		}
+		if mutate != nil {
+			mutate(v)
+		}
+		return jwtchain.RootVerifier(v)
+	}
+	policy := f.policy()
+	policy.Root = verifier(nil)
+	if _, err := policy.VerifyChain(t.Context(), c); err != nil {
+		t.Fatalf("VerifyChain() error = %v", err)
+	}
+	for name, root := range map[string]jwtchain.RootFunc{
+		"other issuer": verifier(func(v *jwt.Verifier) { v.Issuer = "https://other.example" }),
+		"other type":   verifier(func(v *jwt.Verifier) { v.Types = []string{"JWT"} }),
+		"other key":    verifier(func(v *jwt.Verifier) { v.Keys = jwt.Keys{{Public: f.b.Public()}} }),
+	} {
+		policy.Root = root
+		if _, err := policy.VerifyChain(t.Context(), c); !errors.Is(err, jwtchain.ErrVerification) || !errors.Is(err, jwt.ErrInvalidToken) {
+			t.Errorf("%s: VerifyChain() error = %v", name, err)
+		}
+	}
+	// A link presented as a root, to a Verifier that would accept its type.
+	linkToken := c.Leaf()
+	root := verifier(func(v *jwt.Verifier) {
+		v.Types = []string{jwtchain.Type}
+		v.Keys = jwt.Keys{{Public: f.a.Public()}}
+		v.Critical = []string{jwtchain.HeaderParentHash}
+		v.AnyIssuer = true
+	})
+	if _, err := root(t.Context(), linkToken); err == nil {
+		t.Fatal("RootVerifier accepted a link as a root")
+	}
 }
