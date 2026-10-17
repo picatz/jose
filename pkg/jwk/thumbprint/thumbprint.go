@@ -15,9 +15,9 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 )
 
-var (
-	ErrInvalidKey = errors.New("thumbprint: invalid key")
-)
+// ErrInvalidKey reports a key that has no RFC 7638 thumbprint: an
+// unsupported key type, or one missing a required member.
+var ErrInvalidKey = errors.New("thumbprint: invalid key")
 
 // requiredMembers lists, per key type, the members that make up the
 // thumbprint input, already in lexicographic order.
