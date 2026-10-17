@@ -49,9 +49,10 @@ type Restriction struct {
 type DeriveOption func(*deriveConfig) error
 
 type deriveConfig struct {
-	embed bool
-	alg   jwa.Algorithm
-	now   func() time.Time
+	embed  bool
+	alg    jwa.Algorithm
+	now    func() time.Time
+	limits Limits
 }
 
 // Embed carries the parent inside the new link's "prt" header, so the link
@@ -89,6 +90,15 @@ func WithClock(now func() time.Time) DeriveOption {
 	}
 }
 
+// WithLimits sets the bounds Derive holds the new chain to, which should
+// be the verifier's [Policy.Limits]; the default is the zero [Limits].
+func WithLimits(l Limits) DeriveOption {
+	return func(c *deriveConfig) error {
+		c.limits = l
+		return nil
+	}
+}
+
 // Derive returns parent extended by one link that key signs. key must be
 // the parent's holder key: the one its last token's "cnf" names. Hardware
 // keys work like any other [crypto.Signer].
@@ -110,8 +120,8 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 			return nil, err
 		}
 	}
-	if parent.Links() >= DefaultMaxLinks {
-		return nil, fmt.Errorf("jwtchain: a chain may hold at most %d links", DefaultMaxLinks)
+	if parent.Links() >= config.limits.maxLinks() {
+		return nil, fmt.Errorf("jwtchain: a chain may hold at most %d links", config.limits.maxLinks())
 	}
 
 	// Replay the parent to learn what it allows and who holds it.
@@ -120,7 +130,7 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 		return nil, err
 	}
 	for _, link := range parent.tokens[1:] {
-		if err := s.apply(link, DefaultAlgorithms); err != nil {
+		if err := s.apply(link, config.limits.algorithms()); err != nil {
 			return nil, err
 		}
 	}
@@ -186,7 +196,7 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 		claims[ClaimCaveats] = slices.Clone(r.Caveats)
 	}
 	if r.Holder != nil {
-		confirmation, err := Confirmation(r.Holder)
+		confirmation, err := jwt.ConfirmationFor(r.Holder)
 		if err != nil {
 			return nil, fmt.Errorf("jwtchain: Restriction.Holder: %w", err)
 		}
@@ -233,32 +243,14 @@ func Derive(parent *Chain, key crypto.Signer, r Restriction, opts ...DeriveOptio
 	if err != nil {
 		return nil, err
 	}
-	if err := s.apply(link, DefaultAlgorithms); err != nil {
+	if err := s.apply(link, config.limits.algorithms()); err != nil {
 		return nil, err
 	}
 	chain := &Chain{tokens: append(slices.Clone(parent.tokens), link)}
-	if len(chain.String()) > DefaultMaxSize {
-		return nil, fmt.Errorf("jwtchain: the chain would exceed %d bytes", DefaultMaxSize)
+	if len(chain.String()) > config.limits.maxSize() {
+		return nil, fmt.Errorf("jwtchain: the chain would exceed %d bytes", config.limits.maxSize())
 	}
 	return chain, nil
-}
-
-// Confirmation returns the "cnf" claim that makes holder the holder of a
-// root: an issuer sets it so that holder can present the token with proof
-// of possession and derive links from it.
-//
-//	claims[jwt.Confirmation], err = jwtchain.Confirmation(holderKey)
-//
-// https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
-func Confirmation(holder any) (map[string]any, error) {
-	if _, err := jwa.ForKey(holder); err != nil {
-		return nil, fmt.Errorf("jwtchain: holder must be a signing key, so it can prove possession: %w", err)
-	}
-	jkt, err := thumbprint.FromPublicKey(holder)
-	if err != nil {
-		return nil, fmt.Errorf("jwtchain: holder: %w", err)
-	}
-	return map[string]any{"jkt": jkt}, nil
 }
 
 func thumbprintURN(jkt string) string { return thumbprint.URNPrefix + jkt }

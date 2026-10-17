@@ -102,11 +102,12 @@ func rootState(claims jwt.ClaimsSet) (*state, error) {
 			return nil, rootErr("%q must be a JSON object", jwt.Confirmation)
 		}
 		s.confirmation = cnf
-		_, hasJKT := cnf["jkt"]
-		_, hasJWK := cnf["jwk"]
-		if hasJKT || hasJWK {
-			// A root binding a key this package cannot use still verifies
-			// on its own; it just cannot be derived from.
+		// A root binding a key this package cannot use still verifies on
+		// its own; it just cannot be derived from. A "jkt" counts only as
+		// the sole member of "cnf" (see [jwt.ClaimsSet.ConfirmedThumbprint]).
+		if jkt, ok := claims.ConfirmedThumbprint(); ok {
+			s.holder, _ = holderOf(map[string]any{"jkt": jkt})
+		} else if _, hasJKT := cnf["jkt"]; !hasJKT {
 			s.holder, _ = holderOf(cnf)
 		}
 	}

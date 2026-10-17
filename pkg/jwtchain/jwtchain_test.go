@@ -56,7 +56,7 @@ type fixture struct {
 func newFixture(t testing.TB) *fixture {
 	t.Helper()
 	f := &fixture{issuer: ed25519Key(t), a: p256Key(t), b: ed25519Key(t), c: p256Key(t)}
-	cnf, err := jwtchain.Confirmation(f.a.Public())
+	cnf, err := jwt.ConfirmationFor(f.a.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestVerifyRefusals(t *testing.T) {
 			t.Fatal("Verify() accepted an HS256 link")
 		}
 		policy := f.policy()
-		policy.Algorithms = []jwa.Algorithm{jwa.EdDSA}
+		policy.Limits.Algorithms = []jwa.Algorithm{jwa.EdDSA}
 		if _, err := policy.Verify(t.Context(), input); err == nil {
 			t.Fatal("Verify() accepted an algorithm outside Policy.Algorithms")
 		}
@@ -473,7 +473,7 @@ func TestVerifyRefusals(t *testing.T) {
 			c = derive(t, c, f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: f.a.Public()})
 		}
 		policy := f.policy()
-		policy.MaxLinks = 2
+		policy.Limits.MaxLinks = 2
 		if _, err := policy.Verify(t.Context(), c.String()); !errors.Is(err, jwtchain.ErrFormat) {
 			t.Fatalf("Verify() over MaxLinks error = %v, want ErrFormat", err)
 		}
@@ -530,7 +530,7 @@ func TestRootFromPackageJWT(t *testing.T) {
 
 func TestRootScopeRules(t *testing.T) {
 	f := newFixture(t)
-	cnf, _ := jwtchain.Confirmation(f.a.Public())
+	cnf, _ := jwt.ConfirmationFor(f.a.Public())
 	noScope := parse(t, f.mintRoot(t, jwt.ClaimsSet{
 		jwt.Audience:       "https://api.example",
 		jwt.ExpirationTime: now.Add(time.Hour).Unix(),
@@ -691,7 +691,7 @@ func TestReviewRegressions(t *testing.T) {
 	})
 
 	t.Run("root scope splits on spaces only", func(t *testing.T) {
-		cnf, _ := jwtchain.Confirmation(f.a.Public())
+		cnf, _ := jwt.ConfirmationFor(f.a.Public())
 		root := parse(t, f.mintRoot(t, jwt.ClaimsSet{
 			jwt.Audience:       "https://api.example",
 			jwt.Scope:          "read\tadmin write",
@@ -709,7 +709,7 @@ func TestReviewRegressions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := jwtchain.Confirmation(x25519.PublicKey()); err == nil {
+		if _, err := jwt.ConfirmationFor(x25519.PublicKey()); err == nil {
 			t.Fatal("Confirmation() accepted an X25519 key")
 		}
 		if _, err := jwtchain.Derive(parse(t, f.root), f.a, jwtchain.Restriction{Expiry: now.Add(time.Minute), Holder: x25519.PublicKey()}, jwtchain.WithClock(clock)); err == nil {
@@ -718,7 +718,7 @@ func TestReviewRegressions(t *testing.T) {
 	})
 
 	t.Run("malformed root act only fails Actors", func(t *testing.T) {
-		cnf, _ := jwtchain.Confirmation(f.a.Public())
+		cnf, _ := jwt.ConfirmationFor(f.a.Public())
 		root := f.mintRoot(t, jwt.ClaimsSet{
 			jwt.Audience:       "https://api.example",
 			jwt.ExpirationTime: now.Add(time.Hour).Unix(),
