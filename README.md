@@ -1,4 +1,10 @@
-# JOSE [![Go Reference](https://pkg.go.dev/badge/github.com/picatz/jose.svg)](https://pkg.go.dev/github.com/picatz/jose) [![Go Report Card](https://goreportcard.com/badge/github.com/picatz/jose)](https://goreportcard.com/report/github.com/picatz/jose) [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0) 
+# JOSE
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/picatz/jose.svg)](https://pkg.go.dev/github.com/picatz/jose)
+[![Test](https://github.com/picatz/jose/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/picatz/jose/actions/workflows/test.yml)
+[![Scan](https://github.com/picatz/jose/actions/workflows/scan.yml/badge.svg?branch=main)](https://github.com/picatz/jose/actions/workflows/scan.yml)
+[![Go version](https://img.shields.io/github/go-mod/go-version/picatz/jose)](go.mod)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
 
 JavaScript Object Signing and Encryption ([JOSE](https://datatracker.ietf.org/wg/jose/documents/)) implemented in Go.
 
