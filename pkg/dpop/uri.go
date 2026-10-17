@@ -3,6 +3,7 @@ package dpop
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -36,11 +37,21 @@ func TargetURI(raw string) (string, error) {
 	if u.User != nil {
 		return "", fmt.Errorf("dpop: target URI must not contain user information")
 	}
-	if u.Opaque != "" || u.Host == "" {
+	if u.Opaque != "" || u.Hostname() == "" {
 		return "", fmt.Errorf("dpop: target URI must have a host")
 	}
 
 	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		addr, err := netip.ParseAddr(host)
+		if err != nil {
+			return "", fmt.Errorf("dpop: target URI: invalid host %q", host)
+		}
+		// A zone names a local interface; it means nothing to the server.
+		if addr.Zone() != "" {
+			return "", fmt.Errorf("dpop: target URI: host %q must not have an IPv6 zone", host)
+		}
+	}
 	port := u.Port()
 	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
 		port = ""

@@ -14,6 +14,7 @@ import (
 	"github.com/picatz/jose/pkg/jwk"
 	"github.com/picatz/jose/pkg/jwk/thumbprint"
 	"github.com/picatz/jose/pkg/jws"
+	"github.com/picatz/jose/pkg/jwt"
 )
 
 // Signer mints DPoP proofs with one key. It is safe for concurrent use if
@@ -132,10 +133,10 @@ func (s *Signer) Proof(method, uri string, opts ProofOptions) (string, error) {
 	jtiString := base64url.Encode(jti)
 
 	claims := map[string]any{
-		ClaimJWTID:      jtiString,
+		jwt.JWTID:       jtiString,
 		ClaimHTTPMethod: method,
 		ClaimHTTPURI:    htu,
-		ClaimIssuedAt:   s.now().Unix(),
+		jwt.IssuedAt:    s.now().Unix(),
 	}
 	if opts.AccessToken != "" {
 		claims[ClaimAccessTokenHash] = AccessTokenHash(opts.AccessToken)

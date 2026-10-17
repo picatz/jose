@@ -11,12 +11,15 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/header"
 	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jwk"
 	"github.com/picatz/jose/pkg/jwk/thumbprint"
 	"github.com/picatz/jose/pkg/jws"
+	"github.com/picatz/jose/pkg/jwt"
 )
 
 // Defaults for [Verifier].
@@ -202,7 +205,7 @@ func (v *Verifier) Verify(ctx context.Context, proof string, req Request) (*Proo
 		Header:    signed.Header,
 		Claims:    claims,
 	}
-	if p.JTI, err = stringClaim(claims, ClaimJWTID, true); err != nil {
+	if p.JTI, err = stringClaim(claims, jwt.JWTID, true); err != nil {
 		return nil, err
 	}
 	if p.Method, err = stringClaim(claims, ClaimHTTPMethod, true); err != nil {
@@ -217,13 +220,13 @@ func (v *Verifier) Verify(ctx context.Context, proof string, req Request) (*Proo
 	if p.Nonce, err = stringClaim(claims, ClaimNonce, false); err != nil {
 		return nil, err
 	}
-	iat, ok := claims[ClaimIssuedAt].(json.Number)
+	iat, ok := claims[jwt.IssuedAt].(json.Number)
 	if !ok {
-		return nil, invalidf("missing or non-numeric %q", ClaimIssuedAt)
+		return nil, invalidf("missing or non-numeric %q", jwt.IssuedAt)
 	}
 	seconds, err := iat.Float64()
 	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 || seconds > 253402300799 {
-		return nil, invalidf("invalid %q", ClaimIssuedAt)
+		return nil, invalidf("invalid %q", jwt.IssuedAt)
 	}
 	p.IssuedAt = time.Unix(int64(seconds), 0)
 
@@ -300,6 +303,12 @@ func (v *Verifier) Verify(ctx context.Context, proof string, req Request) (*Proo
 }
 
 func decodeClaims(payload []byte) (map[string]any, error) {
+	if !utf8.Valid(payload) {
+		return nil, invalidf("claims are not valid UTF-8")
+	}
+	if err := strictjson.CheckDuplicates(payload); err != nil {
+		return nil, invalidf("claims: %v", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()
 	var claims map[string]any

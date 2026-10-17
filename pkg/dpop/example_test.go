@@ -37,7 +37,7 @@ func Example() {
 		panic(err)
 	}
 
-	// Put this in the access token's "cnf" claim: dpop.Confirmation(jkt).
+	// Put this in the access token's "cnf" claim: jwt.ConfirmationFor(key).
 	fmt.Println(verified.Thumbprint == signer.Thumbprint())
 	// Output: true
 }

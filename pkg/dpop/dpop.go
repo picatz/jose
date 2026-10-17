@@ -34,6 +34,7 @@ import (
 	"maps"
 
 	"github.com/picatz/jose/internal/base64url"
+	"github.com/picatz/jose/pkg/jwt"
 )
 
 // Media type, header and error names.
@@ -73,18 +74,13 @@ const (
 // Claim names used in proofs and in DPoP-bound access tokens.
 const (
 	// https://www.rfc-editor.org/rfc/rfc9449.html#section-4.2
-	ClaimJWTID           = "jti"
+	//
+	// "jti", "iat" and "cnf" are [jwt.JWTID], [jwt.IssuedAt] and
+	// [jwt.Confirmation].
 	ClaimHTTPMethod      = "htm"
 	ClaimHTTPURI         = "htu"
-	ClaimIssuedAt        = "iat"
 	ClaimAccessTokenHash = "ath"
 	ClaimNonce           = "nonce"
-
-	// ClaimConfirmation ("cnf") holds ConfirmationThumbprint ("jkt") in a
-	// DPoP-bound JWT access token.
-	// https://www.rfc-editor.org/rfc/rfc9449.html#section-6.1
-	ClaimConfirmation      = "cnf"
-	ConfirmationThumbprint = "jkt"
 )
 
 var (
@@ -117,27 +113,24 @@ func AccessTokenHash(accessToken string) string {
 	return s
 }
 
-// Confirmation returns the "cnf" claim value that binds a JWT access token
-// to the key with JWK Thumbprint jkt.
-//
-// https://www.rfc-editor.org/rfc/rfc9449.html#section-6.1
-func Confirmation(jkt string) map[string]any {
-	return map[string]any{ConfirmationThumbprint: jkt}
-}
-
 // BoundThumbprint returns the "jkt" member of the "cnf" claim in a JWT
 // access token's claims. Pass the result as [Request.Thumbprint] when
-// verifying the proof that accompanies the token.
+// verifying the proof that accompanies the token. To bind a token, set
+// claims[jwt.Confirmation] to [jwt.ConfirmationFor] of the proof key.
+//
+// It is stricter than RFC 9449 §6.1: "cnf" must hold "jkt" and nothing
+// else, because a token also bound another way (such as RFC 8705
+// "x5t#S256") would have that binding silently ignored here.
 //
 // https://www.rfc-editor.org/rfc/rfc9449.html#section-6.1
 func BoundThumbprint(claims map[string]any) (string, error) {
-	cnf, ok := claims[ClaimConfirmation].(map[string]any)
+	cnf, ok := claims[jwt.Confirmation]
 	if !ok {
-		return "", fmt.Errorf("%w: access token has no %q claim", ErrBinding, ClaimConfirmation)
+		return "", fmt.Errorf("%w: access token has no %q claim", ErrBinding, jwt.Confirmation)
 	}
-	jkt, ok := cnf[ConfirmationThumbprint].(string)
-	if !ok || jkt == "" {
-		return "", fmt.Errorf("%w: %q has no %q member", ErrBinding, ClaimConfirmation, ConfirmationThumbprint)
+	jkt, ok := jwt.ClaimsSet{jwt.Confirmation: cnf}.ConfirmedThumbprint()
+	if !ok {
+		return "", fmt.Errorf("%w: %q must be an object whose only member is a string %q", ErrBinding, jwt.Confirmation, "jkt")
 	}
 	return jkt, nil
 }

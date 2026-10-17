@@ -26,7 +26,7 @@ import (
 // opaqueSigner exposes only crypto.Signer, like a hardware key.
 type opaqueSigner struct{ crypto.Signer }
 
-func newP256(t *testing.T) *ecdsa.PrivateKey {
+func newP256(t testing.TB) *ecdsa.PrivateKey {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -39,7 +39,7 @@ var fixedNow = time.Unix(1_800_000_000, 0)
 
 func clock() time.Time { return fixedNow }
 
-func newSigner(t *testing.T, key crypto.Signer, opts ...dpop.SignerOption) *dpop.Signer {
+func newSigner(t testing.TB, key crypto.Signer, opts ...dpop.SignerOption) *dpop.Signer {
 	t.Helper()
 	s, err := dpop.NewSigner(key, append([]dpop.SignerOption{dpop.WithClock(clock)}, opts...)...)
 	if err != nil {
@@ -325,7 +325,7 @@ func TestTargetURI(t *testing.T) {
 }
 
 func TestBoundThumbprint(t *testing.T) {
-	claims := map[string]any{"cnf": dpop.Confirmation("jkt-1")}
+	claims := map[string]any{"cnf": map[string]any{"jkt": "jkt-1"}}
 	if got, err := dpop.BoundThumbprint(claims); err != nil || got != "jkt-1" {
 		t.Errorf("BoundThumbprint = %q, %v", got, err)
 	}
