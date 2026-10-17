@@ -44,6 +44,10 @@ baggage a security library should not carry into its first release.
   their parent by an RFC 6920 digest or embedded, verified back to the
   issuer, and re-issued with RFC 8693 `act` lineage. A link issued in the
   future (beyond the leeway) is refused.
+  `Policy.Verify` and `VerifyChain` take a context, which reaches
+  `Policy.Root` (a `RootFunc`) and `Policy.Caveat` (a `CaveatFunc`).
+  `RootVerifier` verifies the root with a `jwt.Verifier`, so it passes the
+  same issuer, type, algorithm and key-set checks as any other token.
 - `ni`: RFC 6920 Named Information URIs.
 - `jwt`: RFC 8693 `act` and `may_act` helpers (`Actors`, `SetActors`,
   `AllowedActor`).

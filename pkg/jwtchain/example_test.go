@@ -56,18 +56,23 @@ func Example() {
 	proofs, _ := dpop.NewSigner(subAgent)
 	proof, _ := proofs.Proof("GET", "https://api.example/items/github-token", dpop.ProofOptions{AccessToken: token})
 
-	// The API trusts only the issuer's key.
+	// The API verifies the root as it would any token from the issuer.
 	policy := &jwtchain.Policy{
-		Root:     jwtchain.RootKey(issuerPublic),
+		Root: jwtchain.RootVerifier(&jwt.Verifier{
+			Keys:     jwt.Keys{{Public: issuerPublic}},
+			Types:    []string{"at+jwt"},
+			Issuer:   "https://issuer.example",
+			Audience: "https://api.example",
+		}),
 		Audience: "https://api.example",
-		Caveat: func(caveat string) error {
+		Caveat: func(_ context.Context, caveat string) error {
 			if caveat != "item:github-token" {
 				return fmt.Errorf("unknown caveat")
 			}
 			return nil
 		},
 	}
-	verified, err := policy.Verify(token)
+	verified, err := policy.Verify(context.Background(), token)
 	if err != nil {
 		panic(err)
 	}
