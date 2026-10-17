@@ -13,6 +13,7 @@ import (
 	"github.com/picatz/jose/internal/base64url"
 	"github.com/picatz/jose/internal/strictjson"
 	"github.com/picatz/jose/pkg/header"
+	"github.com/picatz/jose/pkg/jwa"
 	"github.com/picatz/jose/pkg/jws"
 	"github.com/picatz/jose/pkg/jwt"
 	"github.com/picatz/jose/pkg/ni"
@@ -35,11 +36,48 @@ const (
 	Separator = "~"
 )
 
-// Limits a [Policy] and [Parse] apply unless told otherwise.
+// Bounds that a zero [Limits] applies. They keep a hostile chain from
+// costing more than a bounded number of signature checks and bytes.
 const (
+	// DefaultMaxLinks is the most links a chain may hold after its root.
 	DefaultMaxLinks = 8
-	DefaultMaxSize  = 64 << 10
+	// DefaultMaxSize is the most bytes a chain may occupy in its
+	// [Chain.String] form.
+	DefaultMaxSize = 64 << 10
 )
+
+// Limits bounds the chains a [Policy] accepts, [Derive] produces and
+// [Chain.Inspect] reads. The zero value applies the defaults, which are
+// secure, so set a field only to tighten (or deliberately loosen) one.
+type Limits struct {
+	// MaxLinks is the most links a chain may hold after its root; zero (or
+	// negative) means [DefaultMaxLinks].
+	MaxLinks int
+	// MaxSize is the most bytes a chain may occupy, as [Chain.String]
+	// returns it; zero (or negative) means [DefaultMaxSize].
+	MaxSize int
+	// Algorithms lists the link signature algorithms accepted; nil means
+	// [DefaultAlgorithms]. Symmetric algorithms and "none" are always
+	// refused for links, whatever is listed. The root's algorithm is not
+	// governed here; see [Policy.Root].
+	Algorithms []jwa.Algorithm
+}
+
+func (l Limits) maxLinks() int { return orDefault(l.MaxLinks, DefaultMaxLinks) }
+func (l Limits) maxSize() int  { return orDefault(l.MaxSize, DefaultMaxSize) }
+func (l Limits) algorithms() []jwa.Algorithm {
+	if l.Algorithms == nil {
+		return DefaultAlgorithms
+	}
+	return l.Algorithms
+}
+
+func orDefault(n, fallback int) int {
+	if n <= 0 {
+		return fallback
+	}
+	return n
+}
 
 var (
 	// ErrFormat means the input is not a well-formed chain.
@@ -75,9 +113,26 @@ type token struct {
 
 // Parse parses a chain in any of its forms: a bare root, tokens joined by
 // [Separator], a link that embeds its ancestors, or a mix. It applies
-// [DefaultMaxLinks] and [DefaultMaxSize].
+// [DefaultMaxLinks] and [DefaultMaxSize]; use [Limits.Parse] to choose
+// others. Parsing checks structure and digests only, never signatures.
 func Parse(input string) (*Chain, error) {
-	return parse(input, DefaultMaxLinks, DefaultMaxSize)
+	return Limits{}.Parse(input)
+}
+
+// Parse is [Parse] under l's MaxLinks and MaxSize.
+func (l Limits) Parse(input string) (*Chain, error) {
+	return parse(input, l.maxLinks(), l.maxSize())
+}
+
+// check refuses a chain over the limits.
+func (l Limits) check(c *Chain) error {
+	if c.Links() > l.maxLinks() {
+		return fmt.Errorf("%w: more than %d links", ErrFormat, l.maxLinks())
+	}
+	if len(c.String()) > l.maxSize() {
+		return fmt.Errorf("%w: larger than %d bytes", ErrFormat, l.maxSize())
+	}
+	return nil
 }
 
 func parse(input string, maxLinks, maxSize int) (*Chain, error) {
@@ -265,15 +320,28 @@ func (c *Chain) Links() int { return len(c.tokens) - 1 }
 // signature and narrowing against its parent but not the root, whose
 // signature needs the issuer's key, nor time, audience or caveats. Use it
 // to show or plan a chain, such as before [Derive]; never to authorize.
-// Authorize with [Policy.Verify].
+// Authorize with [Policy.Verify]. It applies [DefaultAlgorithms]; use
+// [Limits.Inspect] to choose others.
 func (c *Chain) Inspect() (*Grant, error) {
+	return Limits{}.Inspect(c)
+}
+
+// Inspect is [Chain.Inspect] under l: it refuses a chain over l's MaxLinks
+// or MaxSize and accepts link signatures only with l's Algorithms.
+func (l Limits) Inspect(c *Chain) (*Grant, error) {
+	if c == nil || len(c.tokens) == 0 {
+		return nil, fmt.Errorf("%w: empty chain", ErrFormat)
+	}
+	if err := l.check(c); err != nil {
+		return nil, err
+	}
 	root := c.tokens[0].claims
 	s, err := rootState(root)
 	if err != nil {
 		return nil, err
 	}
 	for _, link := range c.tokens[1:] {
-		if err := s.apply(link, DefaultAlgorithms); err != nil {
+		if err := s.apply(link, l.algorithms()); err != nil {
 			return nil, err
 		}
 	}

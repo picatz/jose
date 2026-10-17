@@ -67,4 +67,48 @@
 // DPoP proof must match (pass it as dpop.Request.Thumbprint), and
 // [Policy.Caveat] is where an application evaluates caveats in whatever
 // language it likes, with the request's context.
+//
+// # Limits
+//
+// [Limits] bounds the number of links, the size in bytes and the accepted
+// link algorithms. Its zero value applies [DefaultMaxLinks],
+// [DefaultMaxSize] and [DefaultAlgorithms]. A [Policy] carries one, and
+// [WithLimits], [Limits.Parse] and [Limits.Inspect] apply the same bounds
+// when deriving, parsing and inspecting.
+//
+// # Usage
+//
+// The issuer mints a root bound to the holder, using [jwt.ConfirmationFor]
+// for the "cnf" claim. The holder narrows it, and a verifier checks it:
+//
+//	parent, err := jwtchain.Parse(rootToken)
+//	chain, err := jwtchain.Derive(parent, holderKey, jwtchain.Restriction{
+//		Expiry: time.Now().Add(5 * time.Minute),
+//		Scope:  []string{"read"},
+//		Holder: nextHolderKey.Public(),
+//	})
+//
+//	policy := &jwtchain.Policy{
+//		Root:     jwtchain.RootKey(issuerPublicKey),
+//		Audience: "https://api.example",
+//	}
+//	grant, err := policy.Verify(ctx, chain.String())
+//
+// # Security
+//
+// Verify with [Policy] only; [Chain.Inspect] does not check the root. The
+// package follows the JWT best current practices (RFC 8725): links carry an
+// explicit "typ" (§3.11), algorithms are allowlisted and never symmetric
+// or "none" (§3.1, §3.2), and a verifier names its audience (§3.9).
+//
+// # References
+//
+//   - RFC 6920, Naming Things with Hashes: https://www.rfc-editor.org/rfc/rfc6920.html
+//   - RFC 7515, JSON Web Signature: https://www.rfc-editor.org/rfc/rfc7515.html
+//   - RFC 7519, JSON Web Token: https://www.rfc-editor.org/rfc/rfc7519.html
+//   - RFC 7638, JWK Thumbprint: https://www.rfc-editor.org/rfc/rfc7638.html
+//   - RFC 7800, Proof-of-Possession Key Semantics ("cnf"): https://www.rfc-editor.org/rfc/rfc7800.html#section-3.1
+//   - RFC 8693, OAuth 2.0 Token Exchange ("act"): https://www.rfc-editor.org/rfc/rfc8693.html#section-4.1
+//   - RFC 8725, JWT Best Current Practices: https://www.rfc-editor.org/rfc/rfc8725.html
+//   - RFC 9278, JWK Thumbprint URI: https://www.rfc-editor.org/rfc/rfc9278.html
 package jwtchain

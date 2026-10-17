@@ -10,7 +10,22 @@
 // registry ("sha-256-32" and so on) are refused because they are too short
 // to bind content.
 //
-// https://www.rfc-editor.org/rfc/rfc6920.html
+// # Usage
+//
+//	uri, err := ni.Sum(crypto.SHA256, []byte("Hello World!"))
+//	// uri.String() == "ni:///sha-256;f4OxZX_x_FO5LcGBSKHWXfwtSx-j1ncoSt3SABJtkGk"
+//
+//	received, err := ni.Parse(s)
+//	if err != nil || !received.Matches(content) { /* reject */ }
+//
+// The text form is the "ni" scheme of RFC 6920 §3 (the URI form, without
+// the "nih" human-readable or well-known URL forms). Digests are compared in
+// constant time.
+//
+//   - RFC 6920, Naming Things with Hashes: https://www.rfc-editor.org/rfc/rfc6920.html
+//   - Hash algorithm registry: https://www.rfc-editor.org/rfc/rfc6920.html#section-9.4
+//   - Use in a chain of JWTs: package jwtchain, with RFC 7515 §4.1.11 ("crit")
+//     and RFC 9278 for key names.
 package ni
 
 import (

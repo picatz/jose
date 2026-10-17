@@ -28,7 +28,7 @@ func Example() {
 	subAgent, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	// The issuer mints an ordinary JWT bound to the agent's key.
-	cnf, _ := jwtchain.Confirmation(agent.Public())
+	cnf, _ := jwt.ConfirmationFor(agent.Public())
 	claims, _ := json.Marshal(jwt.ClaimsSet{
 		jwt.Issuer:         "https://issuer.example",
 		jwt.Subject:        "alice",

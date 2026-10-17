@@ -64,15 +64,9 @@ type Policy struct {
 	// never be ignored. [AcceptCaveats] accepts a fixed set.
 	Caveat CaveatFunc
 
-	// Algorithms lists the link signature algorithms accepted; nil means
-	// [DefaultAlgorithms]. Symmetric algorithms and "none" are always
-	// refused for links. The root's algorithm is Root's concern.
-	Algorithms []jwa.Algorithm
-
-	// MaxLinks and MaxSize bound the chain; zero means [DefaultMaxLinks]
-	// and [DefaultMaxSize].
-	MaxLinks int
-	MaxSize  int
+	// Limits bounds the chain's links, size and link algorithms; the zero
+	// value applies the defaults. The root's algorithm is Root's concern.
+	Limits Limits
 
 	// Leeway is the clock skew tolerated for "exp", "nbf" and a link's
 	// "iat", which may not be in the future; zero means
@@ -203,7 +197,7 @@ func (p *Policy) Verify(ctx context.Context, input string) (*Grant, error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
-	chain, err := parse(input, orDefault(p.MaxLinks, DefaultMaxLinks), orDefault(p.MaxSize, DefaultMaxSize))
+	chain, err := p.Limits.Parse(input)
 	if err != nil {
 		return nil, err
 	}
@@ -221,11 +215,8 @@ func (p *Policy) VerifyChain(ctx context.Context, c *Chain) (*Grant, error) {
 	if c == nil || len(c.tokens) == 0 {
 		return nil, fmt.Errorf("%w: empty chain", ErrFormat)
 	}
-	if c.Links() > orDefault(p.MaxLinks, DefaultMaxLinks) {
-		return nil, fmt.Errorf("%w: more than %d links", ErrFormat, orDefault(p.MaxLinks, DefaultMaxLinks))
-	}
-	if size := len(c.String()); size > orDefault(p.MaxSize, DefaultMaxSize) {
-		return nil, fmt.Errorf("%w: larger than %d bytes", ErrFormat, orDefault(p.MaxSize, DefaultMaxSize))
+	if err := p.Limits.check(c); err != nil {
+		return nil, err
 	}
 	now := time.Now
 	if p.Now != nil {
@@ -257,10 +248,7 @@ func (p *Policy) VerifyChain(ctx context.Context, c *Chain) (*Grant, error) {
 	if err != nil {
 		return nil, err
 	}
-	algorithms := p.Algorithms
-	if algorithms == nil {
-		algorithms = DefaultAlgorithms
-	}
+	algorithms := p.Limits.algorithms()
 	for _, link := range c.tokens[1:] {
 		if err := s.apply(link, algorithms); err != nil {
 			return nil, err
@@ -303,13 +291,6 @@ func (p *Policy) check() error {
 		return errors.New("jwtchain: Policy.Audience is required unless AnyAudience is set")
 	}
 	return nil
-}
-
-func orDefault(n, fallback int) int {
-	if n <= 0 {
-		return fallback
-	}
-	return n
 }
 
 // RootKey returns a [Policy.Root] function that accepts a root signed by
