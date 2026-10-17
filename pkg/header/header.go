@@ -204,6 +204,9 @@ func (h Parameters) Get(param ParameterName) (any, error) {
 	return Get[any](h, param)
 }
 
+// Get returns the value of param in h as a T. It returns an error wrapping
+// [ErrParameterNotFound] if h has no such parameter, and an error if the
+// value is not a T.
 func Get[T any](h Parameters, param ParameterName) (T, error) {
 	var zero T
 

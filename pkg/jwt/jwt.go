@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,9 +17,9 @@ import (
 	"github.com/picatz/jose/pkg/jws"
 )
 
-var (
-	ErrInvalidToken = fmt.Errorf("jwt: invalid token")
-)
+// ErrInvalidToken reports a token that cannot be decoded, or that a
+// [Verifier] refuses; the Verifier's more specific errors wrap it.
+var ErrInvalidToken = errors.New("jwt: invalid token")
 
 // Type "JWT" is the media type used by JSON Web Token (JWT).
 //
