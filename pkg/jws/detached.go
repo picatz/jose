@@ -1,8 +1,6 @@
 package jws
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -22,10 +20,10 @@ func unencodedPayload(h Header) (bool, error) {
 	}
 	b64, ok := value.(bool)
 	if !ok {
-		return false, fmt.Errorf("header parameter %q must be a boolean", header.Base64URLEncodePayload)
+		return false, fail(ErrFormat, "header parameter %q must be a boolean", header.Base64URLEncodePayload)
 	}
 	if !listsCritical(h, header.Base64URLEncodePayload) {
-		return false, fmt.Errorf("header parameter %q must be listed in %q", header.Base64URLEncodePayload, header.Critical)
+		return false, fail(ErrFormat, "header parameter %q must be listed in %q", header.Base64URLEncodePayload, header.Critical)
 	}
 	return !b64, nil
 }
@@ -53,21 +51,21 @@ func listsCritical(h Header, name string) bool {
 func ParseDetached(input string, payload []byte) (*Signature, error) {
 	encodedHeader, signature, ok := splitDetached(input)
 	if !ok {
-		return nil, errors.New(`invalid detached JWS: want "header..signature"`)
+		return nil, fail(ErrFormat, `invalid detached JWS: want "header..signature"`)
 	}
 
 	headerBytes, err := base64url.Decode(encodedHeader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode header: %w", err)
+		return nil, fail(ErrFormat, "failed to decode header: %w", err)
 	}
 	// encoding/json would replace invalid UTF-8 with U+FFFD, exposing a
 	// header that differs from the signed bytes.
 	if !utf8.Valid(headerBytes) {
-		return nil, errors.New("header is not valid UTF-8")
+		return nil, fail(ErrFormat, "header is not valid UTF-8")
 	}
 	h, err := parseHeaderStrict(headerBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse header: %w", err)
+		return nil, fail(ErrFormat, "failed to parse header: %w", err)
 	}
 	unencoded, err := unencodedPayload(h)
 	if err != nil {
@@ -84,17 +82,17 @@ func ParseDetached(input string, payload []byte) (*Signature, error) {
 	}
 
 	if _, err := h.Algorithm(); err != nil {
-		return nil, fmt.Errorf("missing or invalid algorithm parameter: %w", err)
+		return nil, fail(ErrAlgorithm, "missing or invalid algorithm parameter: %w", err)
 	}
 	if err := h.ValidateCriticalHeaders([]string{header.Base64URLEncodePayload}); err != nil {
-		return nil, fmt.Errorf("critical header validation failed: %w", err)
+		return nil, fail(ErrFormat, "critical header validation failed: %w", err)
 	}
 	sig, err := base64url.Decode(signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode signature: %w", err)
+		return nil, fail(ErrFormat, "failed to decode signature: %w", err)
 	}
 	if len(sig) == 0 {
-		return nil, errors.New("unencoded JWS has no signature")
+		return nil, fail(ErrFormat, "unencoded JWS has no signature")
 	}
 	return &Signature{
 		Header:        h,
@@ -125,7 +123,7 @@ func (t *Signature) Detached() (string, error) {
 	first := strings.IndexByte(compact, '.')
 	last := strings.LastIndexByte(compact, '.')
 	if first < 0 || last == first {
-		return "", errors.New("invalid compact JWS")
+		return "", fail(ErrFormat, "invalid compact JWS")
 	}
 	return compact[:first] + "." + compact[last:], nil
 }

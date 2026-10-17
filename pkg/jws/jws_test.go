@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,7 +78,7 @@ func TestJWSBasicFlow(t *testing.T) {
 
 			// Create header
 			h := Header{
-				header.Algorithm: string(tt.algorithm),
+				header.Algorithm: tt.algorithm,
 				header.Type:      "JWS",
 			}
 
@@ -336,5 +337,24 @@ func TestJWSPayloadFlexibility(t *testing.T) {
 				t.Fatalf("parsedToken.Verify() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestVerifyCoversCurrentPayload(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	signed, err := New(Header{header.Algorithm: jwa.HS256}, []byte(`{"sub":"alice"}`), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(signed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parsed.Verify(key); err != nil {
+		t.Fatalf("unchanged token: %v", err)
+	}
+	parsed.Payload = []byte(`{"sub":"mallory"}`)
+	if err := parsed.Verify(key); !errors.Is(err, ErrSignature) {
+		t.Fatalf("Verify after changing Payload = %v, want ErrSignature", err)
 	}
 }

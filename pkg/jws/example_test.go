@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 
@@ -135,7 +136,7 @@ func ExampleNew_unsecured() {
 
 	// Output:
 	// Unsecured JWS: eyJhbGciOiJub25lIn0.VGhpcyBtZXNzYWdlIGhhcyBubyBzaWduYXR1cmU.
-	// Verify refused it: unsecured JWS (alg "none") has no signature to verify
+	// Verify refused it: jws: unsecured JWS (alg "none") has no signature to verify
 }
 
 // ExampleSignJSON signs one payload for two verifiers and checks it the way
@@ -195,4 +196,36 @@ func ExampleParseDetached() {
 	}
 	fmt.Println(received.Verify(key) == nil)
 	// Output: true
+}
+
+// Detached leaves the payload out of the token ("header..signature", RFC 7515
+// Appendix F), so large or already-transported content is not sent twice.
+// The receiver supplies the payload to [jws.ParseDetached].
+func ExampleSignature_Detached() {
+	key := []byte("example-hs256-secret-of-32-bytes")
+	content := []byte("a large document sent separately")
+
+	signed, err := jws.New(jws.Header{header.Algorithm: jwa.HS256}, content, key)
+	if err != nil {
+		panic(err)
+	}
+	token, err := signed.Detached()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(token)
+
+	received, err := jws.ParseDetached(token, content)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("verified:", received.Verify(key) == nil)
+
+	// A different payload does not verify.
+	other, _ := jws.ParseDetached(token, []byte("a different document"))
+	fmt.Println("tampered:", errors.Is(other.Verify(key), jws.ErrSignature))
+	// Output:
+	// eyJhbGciOiJIUzI1NiJ9..ChpjPdfOblqqHxheocvJtMC8QEB45LV0vDrqCDtAwSU
+	// verified: true
+	// tampered: true
 }

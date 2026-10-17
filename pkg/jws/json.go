@@ -3,7 +3,6 @@ package jws
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -17,8 +16,8 @@ import (
 )
 
 // ErrNoValidSignature reports that no signature of a JWS JSON Serialization
-// verified with the given key.
-var ErrNoValidSignature = errors.New("jws: no signature verifies with the key")
+// verifies with the given key. It also matches [ErrSignature].
+var ErrNoValidSignature error = &jwsError{kind: ErrSignature, detail: "no signature verifies with the key"}
 
 // JSON is a JWS in the JSON Serialization: one payload with one or more
 // signatures, each with its own header. Unlike the compact serialization,
@@ -95,24 +94,24 @@ type JSONSigner struct {
 // "alg" "none" is refused: an unsecured JWS has no place among signatures.
 func SignJSON(payload []byte, signers ...JSONSigner) (*JSON, error) {
 	if len(signers) == 0 {
-		return nil, errors.New("jws: SignJSON needs at least one signer")
+		return nil, fail(ErrFormat, "SignJSON needs at least one signer")
 	}
 	encodedPayload := encodeSegment(payload)
 	signed := &JSON{Payload: payload, payload: encodedPayload}
 	for index, signer := range signers {
 		if err := checkJSONHeaders(signer.Protected, signer.Unprotected); err != nil {
-			return nil, fmt.Errorf("jws: signer %d: %w", index, err)
+			return nil, context(err, fmt.Sprintf("signer %d", index))
 		}
 		alg, err := signer.Protected.Algorithm()
 		if err != nil {
-			return nil, fmt.Errorf("jws: signer %d: protected header needs alg: %w", index, err)
+			return nil, fail(ErrAlgorithm, "signer %d: protected header needs alg: %w", index, err)
 		}
 		if alg == jwa.None {
-			return nil, fmt.Errorf("jws: signer %d: alg %q cannot sign", index, alg)
+			return nil, fail(ErrAlgorithm, "signer %d: alg %q cannot sign", index, alg)
 		}
 		protectedJSON, err := json.Marshal(signer.Protected)
 		if err != nil {
-			return nil, fmt.Errorf("jws: signer %d: marshal protected header: %w", index, err)
+			return nil, fail(ErrFormat, "signer %d: marshal protected header: %w", index, err)
 		}
 		entry := JSONSignature{
 			Protected:   signer.Protected,
@@ -121,7 +120,7 @@ func SignJSON(payload []byte, signers ...JSONSigner) (*JSON, error) {
 		}
 		signature, err := new(Signature).signInput(alg, signer.Key, entry.protected+"."+encodedPayload)
 		if err != nil {
-			return nil, fmt.Errorf("jws: signer %d: %w", index, err)
+			return nil, context(err, fmt.Sprintf("signer %d", index))
 		}
 		entry.Signature = signature
 		signed.Signatures = append(signed.Signatures, entry)
@@ -169,32 +168,32 @@ func ParseJSON(data []byte) (*JSON, error) {
 	// encoding/json would replace invalid UTF-8 in an unprotected header
 	// with U+FFFD, exposing values that differ from the wire.
 	if !utf8.Valid(data) {
-		return nil, errors.New("jws: JSON serialization is not UTF-8")
+		return nil, fail(ErrFormat, "JSON serialization is not UTF-8")
 	}
 	if err := strictjson.CheckDuplicates(data); err != nil {
-		return nil, fmt.Errorf("jws: invalid JSON serialization: %w", err)
+		return nil, fail(ErrFormat, "invalid JSON serialization: %w", err)
 	}
 	var wire jsonWire
 	// Members this package does not understand are ignored, as RFC 7515
 	// §7.2.1 requires.
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(&wire); err != nil {
-		return nil, fmt.Errorf("jws: invalid JSON serialization: %w", err)
+		return nil, fail(ErrFormat, "invalid JSON serialization: %w", err)
 	}
 	if decoder.More() {
-		return nil, errors.New("jws: trailing data after JSON serialization")
+		return nil, fail(ErrFormat, "trailing data after JSON serialization")
 	}
 	if wire.Payload == nil {
-		return nil, errors.New("jws: JSON serialization has no payload (detached payloads are not supported)")
+		return nil, fail(ErrFormat, "JSON serialization has no payload (detached payloads are not supported)")
 	}
 	flattened := wire.Protected != nil || wire.Header != nil || wire.Signature != nil
 	switch {
 	case flattened && wire.Signatures != nil:
-		return nil, errors.New("jws: JSON serialization mixes general and flattened syntax")
+		return nil, fail(ErrFormat, "JSON serialization mixes general and flattened syntax")
 	case flattened:
 		wire.Signatures = []jsonWireSig{{Protected: wire.Protected, Header: wire.Header, Signature: wire.Signature}}
 	case len(wire.Signatures) == 0:
-		return nil, errors.New("jws: JSON serialization has no signatures")
+		return nil, fail(ErrFormat, "JSON serialization has no signatures")
 	}
 	payload, err := decodeSegment(*wire.Payload, "payload")
 	if err != nil {
@@ -204,7 +203,7 @@ func ParseJSON(data []byte) (*JSON, error) {
 	for index, entry := range wire.Signatures {
 		signature, err := parseJSONSignature(entry)
 		if err != nil {
-			return nil, fmt.Errorf("jws: signature %d: %w", index, err)
+			return nil, context(err, fmt.Sprintf("signature %d", index))
 		}
 		parsed.Signatures = append(parsed.Signatures, signature)
 	}
@@ -213,10 +212,10 @@ func ParseJSON(data []byte) (*JSON, error) {
 
 func parseJSONSignature(entry jsonWireSig) (JSONSignature, error) {
 	if entry.Signature == nil {
-		return JSONSignature{}, errors.New("missing signature")
+		return JSONSignature{}, fail(ErrFormat, "missing signature")
 	}
 	if entry.Protected == nil && entry.Header == nil {
-		return JSONSignature{}, errors.New("missing header: needs protected or header")
+		return JSONSignature{}, fail(ErrFormat, "missing header: needs protected or header")
 	}
 	var signature JSONSignature
 	if entry.Protected != nil {
@@ -225,31 +224,32 @@ func parseJSONSignature(entry jsonWireSig) (JSONSignature, error) {
 			return JSONSignature{}, err
 		}
 		if !utf8.Valid(protectedJSON) {
-			return JSONSignature{}, errors.New("protected header is not valid UTF-8")
+			return JSONSignature{}, fail(ErrFormat, "protected header is not valid UTF-8")
 		}
 		if signature.Protected, err = parseHeaderStrict(protectedJSON); err != nil {
-			return JSONSignature{}, fmt.Errorf("protected header: %w", err)
+			return JSONSignature{}, fail(ErrFormat, "protected header: %w", err)
 		}
 		signature.protected = *entry.Protected
 	}
 	if entry.Header != nil {
 		signature.Unprotected = Header(entry.Header)
+		normalizeHeader(signature.Unprotected)
 	}
 	if err := checkJSONHeaders(signature.Protected, signature.Unprotected); err != nil {
 		return JSONSignature{}, err
 	}
 	alg, err := signature.Header().Algorithm()
 	if err != nil {
-		return JSONSignature{}, fmt.Errorf("missing or invalid alg: %w", err)
+		return JSONSignature{}, fail(ErrAlgorithm, "missing or invalid alg: %w", err)
 	}
 	if signature.Signature, err = decodeSegment(*entry.Signature, "signature"); err != nil {
 		return JSONSignature{}, err
 	}
 	switch {
 	case alg == jwa.None:
-		return JSONSignature{}, fmt.Errorf("alg %q is unsecured; refusing it", alg)
+		return JSONSignature{}, fail(ErrAlgorithm, "alg %q is unsecured; refusing it", alg)
 	case len(signature.Signature) == 0:
-		return JSONSignature{}, errors.New("empty signature")
+		return JSONSignature{}, fail(ErrFormat, "empty signature")
 	}
 	return signature, nil
 }
@@ -260,17 +260,17 @@ func parseJSONSignature(entry jsonWireSig) (JSONSignature, error) {
 func checkJSONHeaders(protected, unprotected Header) error {
 	for name := range unprotected {
 		if _, ok := protected[name]; ok {
-			return fmt.Errorf("header parameter %q is both protected and unprotected", name)
+			return fail(ErrFormat, "header parameter %q is both protected and unprotected", name)
 		}
 	}
 	if _, ok := unprotected[header.Critical]; ok {
-		return errors.New(`"crit" must be integrity protected`)
+		return fail(ErrFormat, `"crit" must be integrity protected`)
 	}
 	// The unencoded payload option (RFC 7797) is supported only for a
 	// detached compact JWS; see ParseDetached.
 	for _, h := range []Header{protected, unprotected} {
 		if _, ok := h[header.Base64URLEncodePayload]; ok {
-			return fmt.Errorf("header parameter %q is not supported in the JSON serialization", header.Base64URLEncodePayload)
+			return fail(ErrFormat, "header parameter %q is not supported in the JSON serialization", header.Base64URLEncodePayload)
 		}
 	}
 	return processCriticalHeaders(protected)
@@ -290,7 +290,7 @@ func checkJSONHeaders(protected, unprotected Header) error {
 // itself: treat Unprotected parameters, such as a "kid", as hints only.
 func (j *JSON) Verify(key any, allowed ...jwa.Algorithm) (int, error) {
 	if key == nil {
-		return -1, errors.New("jws: Verify needs a key")
+		return -1, fail(ErrAlgorithm, "Verify needs a key")
 	}
 	payload := j.encodedPayload()
 	for index, signature := range j.Signatures {
@@ -315,7 +315,7 @@ func (j *JSON) Verify(key any, allowed ...jwa.Algorithm) (int, error) {
 // https://www.rfc-editor.org/rfc/rfc7515.html#section-7.2.1
 func (j *JSON) General() ([]byte, error) {
 	if len(j.Signatures) == 0 {
-		return nil, errors.New("jws: no signatures to serialize")
+		return nil, fail(ErrFormat, "no signatures to serialize")
 	}
 	payload := j.encodedPayload()
 	wire := jsonWire{Payload: &payload}
@@ -335,7 +335,7 @@ func (j *JSON) General() ([]byte, error) {
 // https://www.rfc-editor.org/rfc/rfc7515.html#section-7.2.2
 func (j *JSON) Flattened() ([]byte, error) {
 	if len(j.Signatures) != 1 {
-		return nil, fmt.Errorf("jws: flattened syntax holds one signature, have %d", len(j.Signatures))
+		return nil, fail(ErrFormat, "flattened syntax holds one signature, have %d", len(j.Signatures))
 	}
 	entry, err := j.Signatures[0].wire()
 	if err != nil {
@@ -350,14 +350,14 @@ func (j *JSON) Flattened() ([]byte, error) {
 // serialization cannot carry.
 func (j *JSON) Compact(index int) (string, error) {
 	if index < 0 || index >= len(j.Signatures) {
-		return "", fmt.Errorf("jws: no signature %d", index)
+		return "", fail(ErrFormat, "no signature %d", index)
 	}
 	signature := j.Signatures[index]
 	if len(signature.Unprotected) > 0 {
-		return "", errors.New("jws: the compact serialization cannot carry unprotected header parameters")
+		return "", fail(ErrFormat, "the compact serialization cannot carry unprotected header parameters")
 	}
 	if len(signature.Protected) == 0 {
-		return "", errors.New("jws: the compact serialization needs a protected header with alg")
+		return "", fail(ErrFormat, "the compact serialization needs a protected header with alg")
 	}
 	entry, err := signature.wire()
 	if err != nil {
@@ -399,7 +399,7 @@ func (s JSONSignature) encodedProtected() (string, error) {
 	}
 	protectedJSON, err := json.Marshal(s.Protected)
 	if err != nil {
-		return "", fmt.Errorf("jws: marshal protected header: %w", err)
+		return "", fail(ErrFormat, "marshal protected header: %w", err)
 	}
 	return encodeSegment(protectedJSON), nil
 }
@@ -429,11 +429,11 @@ func decodeSegment(segment, what string) ([]byte, error) {
 		return []byte{}, nil
 	}
 	if strings.ContainsAny(segment, "=+/") {
-		return nil, fmt.Errorf("jws: %s is not unpadded base64url", what)
+		return nil, fail(ErrFormat, "%s is not unpadded base64url", what)
 	}
 	decoded, err := base64url.Decode(segment)
 	if err != nil {
-		return nil, fmt.Errorf("jws: decode %s: %w", what, err)
+		return nil, fail(ErrFormat, "decode %s: %w", what, err)
 	}
 	return decoded, nil
 }

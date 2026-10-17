@@ -153,14 +153,12 @@ func TestVerifyUsesReceivedEncoding(t *testing.T) {
 	payload := mustEncode(t, []byte(`{"sub":"order matters"}`))
 	input := protected + "." + payload
 
-	signer, err := jws.New(jws.Header{header.Algorithm: jwa.ES256}, []byte("unused"), key)
+	digest := sha256.Sum256([]byte(input))
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
 		t.Fatal(err)
 	}
-	signature, err := signer.SignECDSA(crypto.SHA256, key, input)
-	if err != nil {
-		t.Fatal(err)
-	}
+	signature := append(r.FillBytes(make([]byte, 32)), s.FillBytes(make([]byte, 32))...)
 	parsed, err := jws.Parse(input + "." + mustEncode(t, signature))
 	if err != nil {
 		t.Fatal(err)
