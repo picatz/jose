@@ -7,6 +7,9 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ### Security fixes
 
+- `jwtchain`: a root whose `cnf` yields no holder thumbprint (empty, or
+  `x5t#S256` only) is refused with `ErrBearer` unless `Policy.AllowBearer` is
+  set, so `Grant.Holder` is never empty by default.
 - `jws`, `jwt`: documented that ES* signatures are malleable, so replay and
   revocation caches must key on `jti`, not the raw token; corrected the
   `jwt.Verifier` comment that claimed one string form per token.

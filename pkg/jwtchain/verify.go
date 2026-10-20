@@ -52,8 +52,9 @@ type Policy struct {
 	// someone else would otherwise pass here too.
 	AnyAudience bool
 
-	// AllowBearer accepts a chain whose last token has no "cnf": one that
-	// anyone holding it can use. By default such chains are refused, so a
+	// AllowBearer accepts a chain whose last token binds no holder key: one
+	// with no "cnf", or a "cnf" without a usable "jkt" or "jwk" (empty, or
+	// only "x5t#S256"), which anyone holding it can use. By default such chains are refused, so a
 	// verifier that checks proof of possession against [Grant.Holder]
 	// is never handed an empty thumbprint.
 	AllowBearer bool
@@ -269,8 +270,8 @@ func (p *Policy) VerifyChain(ctx context.Context, c *Chain) (*Grant, error) {
 	if current.Add(leeway).Before(s.issuedAt) {
 		return nil, fmt.Errorf("%w: a link was issued in the future, at %s", ErrVerification, s.issuedAt.UTC().Format(time.RFC3339))
 	}
-	if s.confirmation == nil && !p.AllowBearer {
-		return nil, fmt.Errorf("%w: its last token binds no holder (\"cnf\"), and AllowBearer is not set", ErrBearer)
+	if s.holder == "" && !p.AllowBearer {
+		return nil, fmt.Errorf("%w: its last token binds no holder key (\"cnf\" with \"jkt\" or \"jwk\"), and AllowBearer is not set", ErrBearer)
 	}
 	for _, caveat := range s.caveats {
 		if p.Caveat == nil {
