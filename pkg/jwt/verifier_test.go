@@ -188,20 +188,62 @@ func duplicateClaims(t *testing.T, key *ecdsa.PrivateKey) string {
 	return signature.String()
 }
 
-func TestVerifierChecksTimeBeforeKeys(t *testing.T) {
+// The time claims are judged only after the signature verifies, so an
+// attacker cannot learn from a forged token whether its claims would pass
+// (and a forged token with a past "exp" is a signature failure, not an
+// expiry). This replaces a test that required the opposite order: expiry
+// before the key source was consulted.
+func TestVerifierChecksSignatureBeforeTime(t *testing.T) {
 	f := newVerifierFixture(t)
+	expired := func(_ jws.Header, c map[string]any) { c["exp"] = verifierNow.Add(-time.Hour).Unix() }
+
+	// Genuine but expired: ErrExpired.
+	if _, err := f.verifier.Verify(t.Context(), f.sign(t, expired)); !errors.Is(err, jwt.ErrExpired) {
+		t.Fatalf("signed expired token: %v, want ErrExpired", err)
+	}
+	// Forged (signature of another token) and expired: ErrSignature.
+	genuine := strings.Split(f.sign(t, nil), ".")
+	forged := strings.Split(f.sign(t, expired), ".")
+	forged[2] = genuine[2]
+	_, err := f.verifier.Verify(t.Context(), strings.Join(forged, "."))
+	if !errors.Is(err, jwt.ErrSignature) || errors.Is(err, jwt.ErrExpired) {
+		t.Fatalf("forged expired token: %v, want ErrSignature and not ErrExpired", err)
+	}
+	// Forged with a malformed time claim: also only ErrSignature.
+	forged = strings.Split(f.sign(t, func(_ jws.Header, c map[string]any) { c["exp"] = "soon" }), ".")
+	forged[2] = genuine[2]
+	if _, err := f.verifier.Verify(t.Context(), strings.Join(forged, ".")); !errors.Is(err, jwt.ErrSignature) {
+		t.Fatalf("forged token with bad exp: %v, want ErrSignature", err)
+	}
+	// Signed with a malformed time claim: ErrClaims.
+	if _, err := f.verifier.Verify(t.Context(), f.sign(t, func(_ jws.Header, c map[string]any) { c["exp"] = "soon" })); !errors.Is(err, jwt.ErrClaims) {
+		t.Fatalf("signed token with bad exp: %v, want ErrClaims", err)
+	}
+
 	calls := 0
 	f.verifier.Keys = keySourceFunc(func(context.Context, string) ([]jwt.Key, error) {
 		calls++
-		return nil, errors.New("offline")
+		return nil, fmt.Errorf("offline: %w", context.Canceled)
 	})
-	_, err := f.verifier.Verify(t.Context(), f.sign(t, func(_ jws.Header, c map[string]any) { c["exp"] = verifierNow.Add(-time.Hour).Unix() }))
-	if !errors.Is(err, jwt.ErrExpired) || calls != 0 {
-		t.Fatalf("expired token: %v after %d key lookups", err, calls)
-	}
 	_, err = f.verifier.Verify(t.Context(), f.sign(t, nil))
-	if !errors.Is(err, jwt.ErrKeysUnavailable) || errors.Is(err, jwt.ErrInvalidToken) {
-		t.Fatalf("key source failure: %v", err)
+	if !errors.Is(err, jwt.ErrKeysUnavailable) || errors.Is(err, jwt.ErrInvalidToken) || calls != 1 {
+		t.Fatalf("key source failure: %v after %d lookups", err, calls)
+	}
+	// The cause is kept in the chain.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("key source failure lost its cause: %v", err)
+	}
+}
+
+// The JWS layer's error stays in the chain.
+func TestVerifierKeepsParseCause(t *testing.T) {
+	f := newVerifierFixture(t)
+	parts := strings.Split(f.sign(t, nil), ".")
+	// A header that is canonical base64url but not a JSON object.
+	parts[0] = base64url.Encode([]byte("[]"))
+	_, err := f.verifier.Verify(t.Context(), strings.Join(parts, "."))
+	if !errors.Is(err, jwt.ErrFormat) || !errors.Is(err, jws.ErrFormat) {
+		t.Fatalf("malformed header: %v, want jwt.ErrFormat and jws.ErrFormat", err)
 	}
 }
 

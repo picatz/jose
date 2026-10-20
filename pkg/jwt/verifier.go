@@ -240,7 +240,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	}
 	signature, err := jws.ParseCritical(token, v.Critical...)
 	if err != nil {
-		return nil, refuse(ErrFormat, "%v", err)
+		return nil, fmt.Errorf("%w: %w: %w", ErrInvalidToken, ErrFormat, err)
 	}
 	// A JWT payload is always base64url-encoded (RFC 7519 §7.2), so "b64"
 	// is refused here although the JWS layer understands it, and so is
@@ -279,13 +279,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := v.checkTimes(claims, true); err != nil {
-		return nil, err
-	}
 
 	keys, err := v.Keys.Keys(ctx, kid)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrKeysUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrKeysUnavailable, err)
 	}
 	verified, tried := false, 0
 	for _, key := range keys {
@@ -307,8 +304,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	if err := v.checkClaims(claims); err != nil {
 		return nil, err
 	}
-	// Check the clock again: the key source may have taken a while.
-	if err := v.checkTimes(claims, false); err != nil {
+	// The time claims are judged only now, once the signature has verified,
+	// so a forged token learns nothing from them; the clock is read after
+	// the key source, which may have taken a while.
+	if err := v.checkTimes(claims); err != nil {
 		return nil, err
 	}
 	result := &Token{Header: signature.Header, Claims: tokenClaims(claims), Signature: signature.Signature, raw: token}
@@ -350,10 +349,9 @@ func (v *Verifier) now() time.Time {
 	return v.Now()
 }
 
-// checkTimes checks "exp", "nbf" and "iat". When early is set it runs
-// before the signature check, so it reports only what is cheap and
-// certain; the full check repeats after.
-func (v *Verifier) checkTimes(claims map[string]any, early bool) error {
+// checkTimes checks "exp", "nbf" and "iat". It runs after the signature
+// check.
+func (v *Verifier) checkTimes(claims map[string]any) error {
 	now, leeway := v.now(), cmp.Or(v.Leeway, DefaultLeeway)
 	expiry, hasExpiry, err := dateClaim(claims, ExpirationTime)
 	if err != nil {
@@ -364,9 +362,6 @@ func (v *Verifier) checkTimes(claims map[string]any, early bool) error {
 	}
 	if hasExpiry && !now.Before(expiry.Add(leeway)) {
 		return fmt.Errorf("%w: %w: expired at %s", ErrInvalidToken, ErrExpired, expiry.UTC().Format(time.RFC3339))
-	}
-	if early {
-		return nil
 	}
 	if notBefore, ok, err := dateClaim(claims, NotBefore); err != nil {
 		return err
