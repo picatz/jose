@@ -17,5 +17,11 @@
 // [ParseJSON] refuses more with [ErrFormat], so verification does bounded
 // work.
 //
+// ECDSA signatures are malleable: (r, s) and (r, n-s) both verify, so
+// anyone holding a valid ES256, ES384 or ES512 JWS can derive a second
+// valid string for it. Key replay and revocation caches on an identifier
+// inside the payload (such as a JWT's "jti") or on the signing input, never
+// on the raw token.
+//
 // https://www.rfc-editor.org/rfc/rfc7515.html
 package jws

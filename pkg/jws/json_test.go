@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -408,5 +409,37 @@ func TestParseRejectsLineBreaks(t *testing.T) {
 		if _, err := jws.Parse(strings.Join(mutated, ".")); !errors.Is(err, jws.ErrFormat) {
 			t.Errorf("segment %d with %q: err = %v, want ErrFormat", i, ins, err)
 		}
+	}
+}
+
+// ECDSA signatures are malleable: (r, s) and (r, n-s) both verify. This
+// documents the behavior the package docs warn about; if verification ever
+// starts refusing high-s, make that change deliberately and update the docs.
+func TestECDSAHighSVerifies(t *testing.T) {
+	key := mustECDSA(t, elliptic.P256())
+	signed, err := jws.New(jws.Header{header.Algorithm: jwa.ES256}, []byte("payload"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(signed.String(), ".")
+	sig, err := base64url.Decode(parts[2])
+	if err != nil || len(sig) != 64 {
+		t.Fatalf("signature: %d bytes, %v", len(sig), err)
+	}
+	s := new(big.Int).SetBytes(sig[32:])
+	s.Sub(key.Curve.Params().N, s)
+	flipped := make([]byte, 64)
+	copy(flipped, sig[:32])
+	s.FillBytes(flipped[32:])
+	variant := strings.Join([]string{parts[0], parts[1], base64url.Encode(flipped)}, ".")
+	if variant == signed.String() {
+		t.Fatal("variant equals the original")
+	}
+	parsed, err := jws.Parse(variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parsed.Verify(&key.PublicKey); err != nil {
+		t.Fatalf("high-s variant: %v", err)
 	}
 }

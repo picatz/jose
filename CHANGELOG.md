@@ -7,6 +7,9 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ### Security fixes
 
+- `jws`, `jwt`: documented that ES* signatures are malleable, so replay and
+  revocation caches must key on `jti`, not the raw token; corrected the
+  `jwt.Verifier` comment that claimed one string form per token.
 - `internal/base64url`: decoding refuses CR and LF, which `encoding/base64`
   skips, so a compact JWS or JWE has exactly one string form.
 - `jwe`, `jws`: `ParseJSON` refuses a message with more than 16 recipients or

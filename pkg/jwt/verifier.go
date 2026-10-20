@@ -516,8 +516,10 @@ func typeAccepted(typ string, accepted []string) bool {
 }
 
 // canonical reports whether every segment of token is canonical unpadded
-// base64url (RFC 7515 §2), so one signed token has exactly one string form
-// and caches keyed by the raw token cannot be bypassed.
+// base64url (RFC 7515 §2), so a signature has exactly one encoding. That does
+// not make the token string unique: an ECDSA signature (r, s) and (r, n-s)
+// both verify, so a holder can mint a second valid string for an ES* token.
+// Caches must key on "jti", never on the raw token.
 func canonical(token string) bool {
 	for segment := range strings.SplitSeq(token, ".") {
 		if segment == "" {
