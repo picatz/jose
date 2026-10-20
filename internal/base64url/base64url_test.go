@@ -31,3 +31,11 @@ func TestDecodeRejects(t *testing.T) {
 		t.Errorf("Decode(YQ) = %q, %v", b, err)
 	}
 }
+
+func TestDecodeRejectsLineBreaks(t *testing.T) {
+	for _, s := range []string{"Y\nQ", "YQ\n", "Y\rQ", "\r\nYQ", "YW\r\nJj"} {
+		if _, err := Decode(s); err == nil {
+			t.Errorf("Decode(%q) succeeded, want error", s)
+		}
+	}
+}

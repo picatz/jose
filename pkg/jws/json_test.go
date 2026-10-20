@@ -388,3 +388,25 @@ func TestParseJSONSignatureLimit(t *testing.T) {
 		}
 	}
 }
+
+// encoding/base64 skips CR and LF, which would give one token several
+// valid strings. Parse must refuse them in every segment.
+func TestParseRejectsLineBreaks(t *testing.T) {
+	secret := []byte(strings.Repeat("k", 32))
+	signed, err := jws.New(jws.Header{header.Algorithm: jwa.HS256}, []byte("payload"), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signed.String()
+	if _, err := jws.Parse(compact); err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(compact, ".")
+	for i, ins := range []string{"\n", "\r\n", "\r"} {
+		mutated := append([]string(nil), parts...)
+		mutated[i] = mutated[i][:2] + ins + mutated[i][2:]
+		if _, err := jws.Parse(strings.Join(mutated, ".")); !errors.Is(err, jws.ErrFormat) {
+			t.Errorf("segment %d with %q: err = %v, want ErrFormat", i, ins, err)
+		}
+	}
+}

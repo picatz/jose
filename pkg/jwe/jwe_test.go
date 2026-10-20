@@ -335,3 +335,24 @@ func TestOpaqueRecipients(t *testing.T) {
 		t.Fatalf("Decrypter: %q, %v", got, err)
 	}
 }
+
+// encoding/base64 skips CR and LF, which would give one token several
+// valid strings. Parse must refuse them in every segment.
+func TestParseRejectsLineBreaks(t *testing.T) {
+	key := make([]byte, 16)
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.A128KW, header.EncryptionAlgorithm: jwa.A128GCM}, []byte("x"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(compact, ".")
+	for i, p := range parts {
+		if len(p) < 3 {
+			continue // empty segment: nothing to break
+		}
+		mutated := append([]string(nil), parts...)
+		mutated[i] = p[:2] + "\r\n" + p[2:]
+		if _, err := jwe.Parse(strings.Join(mutated, ".")); !errors.Is(err, jwe.ErrMalformed) {
+			t.Errorf("segment %d: err = %v, want ErrMalformed", i, err)
+		}
+	}
+}
