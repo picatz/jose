@@ -119,6 +119,10 @@ type jsonWire struct {
 	Tag          *string         `json:"tag"`
 }
 
+// maxRecipients bounds the recipients of a JSON serialization, so a message
+// cannot make DecryptJSON do unbounded private key operations.
+const maxRecipients = 16
+
 type jsonWireRecip struct {
 	Header       map[string]any `json:"header,omitempty"`
 	EncryptedKey *string        `json:"encrypted_key,omitempty"`
@@ -134,8 +138,10 @@ type jsonWireRecip struct {
 // in the protected or shared unprotected header. "crit" is only accepted in
 // the protected header (§4.1.13), "zip" is refused as in the compact
 // serialization, and "dir" and "ECDH-ES" are refused for more than one
-// recipient because they fix the CEK. Unknown top-level members are
-// ignored.
+// recipient because they fix the CEK. More than 16 recipients are refused
+// with [ErrMalformed] before any key is tried, since each recipient costs a
+// private key operation in [Decrypter.DecryptJSON]. Unknown top-level
+// members are ignored.
 func ParseJSON(data []byte) (*JSON, error) {
 	// encoding/json would replace invalid UTF-8 in an unprotected header
 	// with U+FFFD, exposing values that differ from the wire.
@@ -163,6 +169,10 @@ func ParseJSON(data []byte) (*JSON, error) {
 		return nil, fmt.Errorf("%w: JSON serialization has no recipients", ErrMalformed)
 	case recipients == nil:
 		recipients = []jsonWireRecip{{Header: wire.Header, EncryptedKey: wire.EncryptedKey}}
+	}
+
+	if len(recipients) > maxRecipients {
+		return nil, fmt.Errorf("%w: %d recipients exceed the limit of %d", ErrMalformed, len(recipients), maxRecipients)
 	}
 
 	j := &JSON{}

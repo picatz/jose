@@ -7,6 +7,8 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ### Security fixes
 
+- `jwe`, `jws`: `ParseJSON` refuses a message with more than 16 recipients or
+  signatures, so `DecryptJSON` and `Verify` do bounded work.
 - `jws`: `Verify` on a parsed compact JWS now covers the current `Payload`,
   not only the payload that was parsed.
 - `jwe`: a compact JWE whose `epk` header has a foreign `kty` no longer

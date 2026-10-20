@@ -33,6 +33,9 @@
 // (compact) and [Decrypter.DecryptJSON] (JSON Serialization). Every
 // decryption failure after the structure is accepted returns the same
 // [ErrDecryption], so the error is no oracle for the key or the content.
+// A JSON Serialization may carry at most 16 recipients, because each one
+// costs a private key operation; [ParseJSON] refuses more with
+// [ErrMalformed].
 //
 // # Keys
 //

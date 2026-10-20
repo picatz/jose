@@ -13,7 +13,9 @@
 // Signing takes any [crypto.Signer] for asymmetric algorithms, so keys held
 // in hardware sign like in-memory keys. Verification checks the key type
 // and curve against the algorithm, and an unsecured JWS ("alg" "none")
-// never verifies.
+// never verifies. A JSON serialization may carry at most 16 signatures;
+// [ParseJSON] refuses more with [ErrFormat], so verification does bounded
+// work.
 //
 // https://www.rfc-editor.org/rfc/rfc7515.html
 package jws

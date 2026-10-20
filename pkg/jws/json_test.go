@@ -362,3 +362,29 @@ func TestParseJSONRefusesInvalidUTF8(t *testing.T) {
 		t.Fatalf("ParseJSON() error = %v, want a UTF-8 refusal", err)
 	}
 }
+
+// A message with many signatures would make Verify do work for each, so
+// ParseJSON refuses more than 16 before any verification.
+func TestParseJSONSignatureLimit(t *testing.T) {
+	secret := []byte(strings.Repeat("k", 32))
+	for _, tc := range []struct {
+		n    int
+		want error
+	}{{16, nil}, {17, jws.ErrFormat}} {
+		signers := make([]jws.JSONSigner, tc.n)
+		for i := range signers {
+			signers[i] = jws.JSONSigner{Protected: jws.Header{header.Algorithm: jwa.HS256}, Key: secret}
+		}
+		signed, err := jws.SignJSON([]byte("x"), signers...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire, err := signed.General()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := jws.ParseJSON(wire); !errors.Is(err, tc.want) {
+			t.Fatalf("%d signatures: err = %v, want %v", tc.n, err, tc.want)
+		}
+	}
+}
