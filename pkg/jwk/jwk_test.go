@@ -347,6 +347,23 @@ func TestMemberNames(t *testing.T) {
 
 // RFC 7517 §5: keys with an unrecognized "kty" are ignored, so one new key
 // type does not make the whole set unusable.
+// A known kty on a curve this package does not support is ignored the same
+// way, so one secp256k1 or Ed448 key does not make the set unusable.
+func TestSetValidateIgnoresUnknownCurve(t *testing.T) {
+	good := Key{KeyType: "oct", K: "AAAA", KeyID: "a"}
+	for _, other := range []Key{
+		{KeyType: "EC", Curve: "secp256k1", X: "AAAA", Y: "AAAA", KeyID: "k1"},
+		{KeyType: "OKP", Curve: "Ed448", X: "AAAA", KeyID: "ed448"},
+	} {
+		if err := (&Set{Keys: []Key{other, good}}).Validate(); err != nil {
+			t.Errorf("%v next to a good key: %v", other[Curve], err)
+		}
+		if err := (&Set{Keys: []Key{other}}).Validate(); !errors.Is(err, ErrFormat) {
+			t.Errorf("only %v: error = %v, want ErrFormat", other[Curve], err)
+		}
+	}
+}
+
 func TestSetValidateIgnoresUnknownKeyType(t *testing.T) {
 	good := Key{KeyType: "oct", K: "AAAA", KeyID: "a"}
 	future := Key{KeyType: "AKP", KeyID: "pq"}
@@ -362,6 +379,7 @@ func TestSetValidateIgnoresUnknownKeyType(t *testing.T) {
 		"known but malformed": {KeyType: "EC", Curve: "P-256", KeyID: "ec"},
 		"no kty":              {KeyID: "none"},
 		"kty not string":      {KeyType: 1, KeyID: "num"},
+		"crv not string":      {KeyType: "EC", Curve: 256, KeyID: "crv"},
 	} {
 		if err := (&Set{Keys: []Key{future, good, bad}}).Validate(); !errors.Is(err, ErrInvalidKey) {
 			t.Errorf("%s: error = %v, want ErrInvalidKey", name, err)

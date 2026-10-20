@@ -111,10 +111,11 @@ func (k Keys) Keys(_ context.Context, kid string) ([]Key, error) {
 // "use" is "sig" or absent and whose "key_ops", if present, include
 // "verify". Each key's "kid" and "alg" carry over. A set that holds a
 // private or symmetric key is refused, since a published set never should.
-// As RFC 7517 §5 recommends, a key whose "kty" is not EC, RSA or OKP is
-// ignored, so a provider can publish a new key type next to the old ones;
-// a key with a known "kty" must be well formed, and a set whose keys are
-// all ignored for their "kty" is refused with [jwk.ErrFormat].
+// As RFC 7517 §5 recommends, a key whose "kty" is not EC, RSA or OKP, or
+// whose curve no signature here uses (such as secp256k1, Ed448 or X25519),
+// is ignored, so a provider can publish a new key type next to the old
+// ones; any other key must be well formed, and a set whose keys are all
+// ignored is refused with [jwk.ErrFormat].
 //
 // https://www.rfc-editor.org/rfc/rfc7517.html#section-4.2
 func KeysFromSet(set *jwk.Set) (Keys, error) {
@@ -127,13 +128,9 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		if jwk.IsPrivate(v) || v[jwk.KeyType] == "oct" {
 			return nil, fmt.Errorf("jwt: key set entry %d is a private or symmetric key", i)
 		}
-		if kty, ok := v[jwk.KeyType].(string); ok {
-			switch kty {
-			case jwk.KeyTypeEC, jwk.KeyTypeRSA, jwk.KeyTypeOKP:
-			default:
-				unknown++
-				continue
-			}
+		if unrecognizedKey(v) {
+			unknown++
+			continue
 		}
 		if use, ok := v[jwk.PublicKeyUse]; ok && use != "sig" {
 			continue
@@ -153,9 +150,29 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		out = append(out, Key{ID: kid, Algorithm: jwa.Algorithm(alg), Public: public})
 	}
 	if unknown > 0 && len(out) == 0 {
-		return nil, fmt.Errorf("jwt: %w: no key set entry has a supported \"kty\"", jwk.ErrFormat)
+		return nil, fmt.Errorf("jwt: %w: no key set entry has a supported \"kty\" and \"crv\"", jwk.ErrFormat)
 	}
 	return out, nil
+}
+
+// unrecognizedKey reports whether a set member names a "kty", or for "EC"
+// and "OKP" keys a "crv", that is a string no signature here can use.
+// X25519 is a key-agreement curve, so it is unrecognized for verifying.
+func unrecognizedKey(key jwk.Key) bool {
+	kty, ok := key[jwk.KeyType].(string)
+	if !ok {
+		return false
+	}
+	crv, named := key[jwk.Curve].(string)
+	switch kty {
+	case jwk.KeyTypeRSA:
+		return false
+	case jwk.KeyTypeEC:
+		return named && crv != jwk.CurveP256 && crv != jwk.CurveP384 && crv != jwk.CurveP521
+	case jwk.KeyTypeOKP:
+		return named && crv != jwk.CurveEd25519
+	}
+	return true
 }
 
 // Verifier checks JWTs: their JOSE layer (size, encoding, type,

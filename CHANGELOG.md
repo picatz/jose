@@ -12,9 +12,10 @@ Until v1, minor versions may change the API; every change is listed here.
   expired token now gives `ErrSignature`, not `ErrExpired`), and it wraps the
   JWS and key source causes with `%w` so `errors.Is` sees them.
 - `jwk`, `jwt`: `Set.Validate` and `jwt.KeysFromSet` ignore keys with an
-  unrecognized `kty` (RFC 7517 section 5), so one new key type no longer makes
-  a whole JWK Set unusable; a malformed key of a known type, or a set with no
-  usable key, is still refused.
+  unrecognized `kty`, or an `EC` or `OKP` curve they do not support such as
+  `secp256k1` or `Ed448` (RFC 7517 section 5), so one new key type no longer
+  makes a whole JWK Set unusable; a malformed key of a known type, or a set
+  with no usable key, is still refused.
 - `dpop`: a full `MemoryReplayCache` refuses in constant time until its
   earliest entry expires instead of scanning on every check; the doc now warns
   that unauthenticated clients can fill it.

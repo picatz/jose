@@ -405,6 +405,26 @@ func TestKeysFromSetIgnoresUnknownKeyType(t *testing.T) {
 	}
 }
 
+// A curve no signature here uses is ignored like an unknown kty.
+func TestKeysFromSetIgnoresUnknownCurve(t *testing.T) {
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	value, err := jwk.PublicValue(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := clone(value, map[string]any{"kid": "sig"})
+	for _, other := range []jwk.Key{
+		{"kty": "EC", "crv": "secp256k1", "x": "AAAA", "y": "AAAA", "kid": "k1"},
+		{"kty": "OKP", "crv": "Ed448", "x": "AAAA", "kid": "ed448"},
+		{"kty": "OKP", "crv": "X25519", "x": "AAAA", "kid": "ecdh"},
+	} {
+		keys, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Key{other, good}})
+		if err != nil || len(keys) != 1 || keys[0].ID != "sig" {
+			t.Fatalf("%v next to a good key: %+v, %v", other["crv"], keys, err)
+		}
+	}
+}
+
 func clone(v jwk.Key, extra map[string]any) jwk.Key {
 	out := jwk.Key{}
 	for k, value := range v {
