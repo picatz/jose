@@ -5,6 +5,13 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ## Unreleased
 
+### Stability
+
+- The module reached the reviewed rung of the Keyblade stability ladder on
+  2026-10-20: a second-reader security review, a fuzz target for every parser
+  and verifier, and a fresh-clone run by a non-author
+  ([evidence](docs/evidence/reviewed.md)).
+
 ### Security fixes
 
 - `jwt`: `Verifier` judges `exp`, `nbf` and `iat` only after the signature

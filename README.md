@@ -29,7 +29,16 @@ There are no dependencies beyond the Go standard library.
 
 ## Quickstart
 
-Mint a token with `jwt.New` and verify it with a `jwt.Verifier`:
+Mint a token with `jwt.New` and verify it with a `jwt.Verifier`. The
+packages live under `pkg/`:
+
+```go
+import (
+	"github.com/picatz/jose/pkg/header"
+	"github.com/picatz/jose/pkg/jwa"
+	"github.com/picatz/jose/pkg/jwt"
+)
+```
 
 ```go
 // The issuer signs with a private key...
@@ -115,6 +124,17 @@ JWE decryption accepts `jwe.KeyAgreement` and `crypto.Decrypter` likewise.
 - JWE failures return one error, so decryption is no oracle; RSA1_5, PBES2 and `zip` are not implemented.
 - Key sets are fetched only from URLs you configure (https, or loopback http), never from `jku` or `x5u`, with a 1 MiB cap, no https-to-http redirect, and a fetch that never blocks verifiers of cached keys.
 - JWK Sets that publish private or symmetric keys are refused.
+- JWE and JWS JSON serializations carry at most 16 recipients or signatures.
+- FIPS 140-only mode (`GODEBUG=fips140=only`) is not supported: JWE needs
+  AES-GCM with a caller-chosen IV, which that mode refuses.
+
+## Stability
+
+The module is at the **reviewed** rung of the
+[Keyblade stability ladder](https://github.com/picatz/go-keyblade/blob/main/docs/stability.md#gates):
+a second-reader security review, a fuzz target for every parser and verifier,
+and a fresh-clone run by a non-author. See
+[docs/evidence/reviewed.md](docs/evidence/reviewed.md). It is not tagged yet.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability and
 [CHANGELOG.md](CHANGELOG.md) for every API change.
