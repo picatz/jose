@@ -340,6 +340,29 @@ func TestKeysFromSet(t *testing.T) {
 	}
 }
 
+// RFC 7517 §5: keys with an unrecognized "kty" are ignored, so one new key
+// type does not make the whole set unusable.
+func TestKeysFromSetIgnoresUnknownKeyType(t *testing.T) {
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	value, err := jwk.PublicValue(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := clone(value, map[string]any{"kid": "sig"})
+	future := jwk.Key{"kty": "AKP", "kid": "pq"}
+	keys, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Key{future, good}})
+	if err != nil || len(keys) != 1 || keys[0].ID != "sig" {
+		t.Fatalf("unknown kty next to a good key: %+v, %v", keys, err)
+	}
+	if _, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Key{future}}); !errors.Is(err, jwk.ErrFormat) {
+		t.Fatalf("only unknown kty: error = %v, want ErrFormat", err)
+	}
+	broken := jwk.Key{"kty": "EC", "crv": "P-256", "kid": "ec"}
+	if _, err := jwt.KeysFromSet(&jwk.Set{Keys: []jwk.Key{future, good, broken}}); !errors.Is(err, jwk.ErrInvalidKey) {
+		t.Fatalf("known kty but malformed: error = %v, want ErrInvalidKey", err)
+	}
+}
+
 func clone(v jwk.Key, extra map[string]any) jwk.Key {
 	out := jwk.Key{}
 	for k, value := range v {

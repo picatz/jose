@@ -111,6 +111,10 @@ func (k Keys) Keys(_ context.Context, kid string) ([]Key, error) {
 // "use" is "sig" or absent and whose "key_ops", if present, include
 // "verify". Each key's "kid" and "alg" carry over. A set that holds a
 // private or symmetric key is refused, since a published set never should.
+// As RFC 7517 §5 recommends, a key whose "kty" is not EC, RSA or OKP is
+// ignored, so a provider can publish a new key type next to the old ones;
+// a key with a known "kty" must be well formed, and a set whose keys are
+// all ignored for their "kty" is refused with [jwk.ErrFormat].
 //
 // https://www.rfc-editor.org/rfc/rfc7517.html#section-4.2
 func KeysFromSet(set *jwk.Set) (Keys, error) {
@@ -118,9 +122,18 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		return nil, errors.New("jwt: nil key set")
 	}
 	var out Keys
+	unknown := 0
 	for i, v := range set.Keys {
 		if jwk.IsPrivate(v) || v[jwk.KeyType] == "oct" {
 			return nil, fmt.Errorf("jwt: key set entry %d is a private or symmetric key", i)
+		}
+		if kty, ok := v[jwk.KeyType].(string); ok {
+			switch kty {
+			case jwk.KeyTypeEC, jwk.KeyTypeRSA, jwk.KeyTypeOKP:
+			default:
+				unknown++
+				continue
+			}
 		}
 		if use, ok := v[jwk.PublicKeyUse]; ok && use != "sig" {
 			continue
@@ -138,6 +151,9 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		kid, _ := v[jwk.KeyID].(string)
 		alg, _ := v[jwk.Algorithm].(string)
 		out = append(out, Key{ID: kid, Algorithm: jwa.Algorithm(alg), Public: public})
+	}
+	if unknown > 0 && len(out) == 0 {
+		return nil, fmt.Errorf("jwt: %w: no key set entry has a supported \"kty\"", jwk.ErrFormat)
 	}
 	return out, nil
 }

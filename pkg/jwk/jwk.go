@@ -141,8 +141,12 @@ func (s *Set) checkKeyIDs() error {
 	return nil
 }
 
-// Validate checks that the set has at least one key, that no "kid" repeats,
-// and that every key passes [Validate].
+// Validate checks that the set has at least one usable key, that no "kid"
+// repeats, and that every key passes [Validate]. As RFC 7517 §5 recommends,
+// a key whose "kty" is a string this package does not know is ignored
+// rather than failing the whole set, so a provider can publish a new key
+// type next to the old ones; a key with a known "kty" must be well formed,
+// and a set with only ignored keys is refused.
 func (s *Set) Validate() error {
 	if len(s.Keys) == 0 {
 		return fmt.Errorf("%w: no keys", ErrFormat)
@@ -150,12 +154,28 @@ func (s *Set) Validate() error {
 	if err := s.checkKeyIDs(); err != nil {
 		return err
 	}
+	usable := 0
 	for i, key := range s.Keys {
+		if kty, ok := key[KeyType].(string); ok && !knownKeyType(kty) {
+			continue
+		}
 		if err := Validate(key); err != nil {
 			return fmt.Errorf("jwk: key %d: %w", i, err)
 		}
+		usable++
+	}
+	if usable == 0 {
+		return fmt.Errorf("%w: no key has a supported \"kty\"", ErrFormat)
 	}
 	return nil
+}
+
+func knownKeyType(kty string) bool {
+	switch kty {
+	case KeyTypeEC, KeyTypeRSA, KeyTypeOct, KeyTypeOKP:
+		return true
+	}
+	return false
 }
 
 // Get returns the key whose "kid" is kid.

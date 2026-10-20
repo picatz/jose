@@ -263,8 +263,10 @@ func TestParseSetErrors(t *testing.T) {
 			t.Errorf("%s: ParseSet() error = %v, want ErrFormat", name, err)
 		}
 	}
-	// Unlike Validate, ParseSet takes keys it does not understand.
-	set, err := ParseSet([]byte(`{"keys":[{"kty":"XYZ"}, {"kty":"oct","k":"AAAA"}]}`))
+	// ParseSet does not look at the keys; Validate refuses a malformed key
+	// of a known type. (A key of an unknown type is ignored since RFC 7517
+	// §5 says so: see TestSetValidateIgnoresUnknownKeyType.)
+	set, err := ParseSet([]byte(`{"keys":[{"kty":"EC","crv":"P-256"}, {"kty":"oct","k":"AAAA"}]}`))
 	if err != nil || len(set.Keys) != 2 {
 		t.Fatalf("ParseSet() = %v, %v", set, err)
 	}
@@ -339,6 +341,30 @@ func TestMemberNames(t *testing.T) {
 	} {
 		if got != want {
 			t.Errorf("constant = %q, want %q", got, want)
+		}
+	}
+}
+
+// RFC 7517 §5: keys with an unrecognized "kty" are ignored, so one new key
+// type does not make the whole set unusable.
+func TestSetValidateIgnoresUnknownKeyType(t *testing.T) {
+	good := Key{KeyType: "oct", K: "AAAA", KeyID: "a"}
+	future := Key{KeyType: "AKP", KeyID: "pq"}
+	if err := (&Set{Keys: []Key{future, good}}).Validate(); err != nil {
+		t.Errorf("unknown kty next to a good key: %v", err)
+	}
+	if err := (&Set{Keys: []Key{future}}).Validate(); !errors.Is(err, ErrFormat) {
+		t.Errorf("only unknown kty: error = %v, want ErrFormat", err)
+	}
+	// A known kty must still be well formed, and a missing or non-string
+	// kty is malformed, not unknown.
+	for name, bad := range map[string]Key{
+		"known but malformed": {KeyType: "EC", Curve: "P-256", KeyID: "ec"},
+		"no kty":              {KeyID: "none"},
+		"kty not string":      {KeyType: 1, KeyID: "num"},
+	} {
+		if err := (&Set{Keys: []Key{future, good, bad}}).Validate(); !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("%s: error = %v, want ErrInvalidKey", name, err)
 		}
 	}
 }
