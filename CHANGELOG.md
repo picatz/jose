@@ -11,6 +11,8 @@ Until v1, minor versions may change the API; every change is listed here.
   verifies, so a forged token learns nothing about claim checks (a forged
   expired token now gives `ErrSignature`, not `ErrExpired`), and it wraps the
   JWS and key source causes with `%w` so `errors.Is` sees them.
+- `jwa`: `ForKey` refuses a typed nil RSA or ECDSA key, such as a failed
+  `GenerateKey` leaves, instead of panicking.
 - `jwk`, `jwt`: `Set.Validate` and `jwt.KeysFromSet` ignore keys with an
   unrecognized `kty`, or an `EC` or `OKP` curve they do not support such as
   `secp256k1` or `Ed448` (RFC 7517 section 5), so one new key type no longer

@@ -31,7 +31,10 @@ func TestConfirmationFor(t *testing.T) {
 			t.Errorf("%s: jkt = %v, want %v", name, got["jkt"], want)
 		}
 	}
-	x, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	x, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, bad := range []any{x, x.PublicKey(), "key", nil} {
 		if _, err := jwt.ConfirmationFor(bad); err == nil {
 			t.Errorf("ConfirmationFor(%T) succeeded", bad)

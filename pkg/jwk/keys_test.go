@@ -97,9 +97,18 @@ func TestPublicKeyRejectsMalformedMembers(t *testing.T) {
 }
 
 func TestPrivateKeyRoundTrips(t *testing.T) {
-	ecKey, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
-	xKey, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	ecKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ecValue, _ := jwk.PublicValue(ecKey)
 	ecD := make([]byte, 48)

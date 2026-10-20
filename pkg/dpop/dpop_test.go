@@ -125,6 +125,8 @@ func TestSignAndVerify(t *testing.T) {
 }
 
 func TestNewSignerRejectsUnusableKeys(t *testing.T) {
+	// FIPS 140-only mode refuses to generate the key at all, which leaves
+	// a typed nil that must be refused too.
 	small, _ := rsa.GenerateKey(rand.Reader, 1024)
 	if _, err := dpop.NewSigner(small); err == nil {
 		t.Error("accepted a 1024-bit RSA key")

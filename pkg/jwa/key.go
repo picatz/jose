@@ -20,6 +20,26 @@ import (
 //
 // Callers that need RS256 for compatibility must set it explicitly.
 func ForKey(key any) (Algorithm, error) {
+	// A typed nil key, such as the result of a failed GenerateKey, would
+	// panic in Public or Size; refuse it like any other unusable key.
+	switch k := key.(type) {
+	case *rsa.PrivateKey:
+		if k == nil {
+			return "", fmt.Errorf("%w: nil RSA key", ErrUnknownAlgorithm)
+		}
+	case *ecdsa.PrivateKey:
+		if k == nil {
+			return "", fmt.Errorf("%w: nil ECDSA key", ErrUnknownAlgorithm)
+		}
+	case *rsa.PublicKey:
+		if k == nil {
+			return "", fmt.Errorf("%w: nil RSA key", ErrUnknownAlgorithm)
+		}
+	case *ecdsa.PublicKey:
+		if k == nil {
+			return "", fmt.Errorf("%w: nil ECDSA key", ErrUnknownAlgorithm)
+		}
+	}
 	if signer, ok := key.(crypto.Signer); ok {
 		key = signer.Public()
 	}

@@ -131,9 +131,18 @@ func TestCookbookDecrypt(t *testing.T) {
 }
 
 func TestRoundTripEveryAlgorithm(t *testing.T) {
-	p256, _ := ecdh.P256().GenerateKey(rand.Reader)
-	p521, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	x25519, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	p256, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p521, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x25519, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

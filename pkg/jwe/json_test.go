@@ -184,7 +184,10 @@ func TestJSONFlattenedAndDirect(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var decrypt any = key
 			if name == "ECDH-ES" {
-				ec, _ := ecdh.X25519().GenerateKey(rand.Reader)
+				ec, err := ecdh.X25519().GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatal(err)
+				}
 				recipient.Key, decrypt = ec.PublicKey(), ec
 			}
 			j, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("one"), []byte("aad"), recipient)
