@@ -7,6 +7,9 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ### Security fixes
 
+- `dpop`: a full `MemoryReplayCache` refuses in constant time until its
+  earliest entry expires instead of scanning on every check; the doc now warns
+  that unauthenticated clients can fill it.
 - `jwtchain`: a root whose `cnf` yields no holder thumbprint (empty, or
   `x5t#S256` only) is refused with `ErrBearer` unless `Policy.AllowBearer` is
   set, so `Grant.Holder` is never empty by default.
