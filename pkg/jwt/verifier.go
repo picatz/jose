@@ -111,6 +111,11 @@ func (k Keys) Keys(_ context.Context, kid string) ([]Key, error) {
 // "use" is "sig" or absent and whose "key_ops", if present, include
 // "verify". Each key's "kid" and "alg" carry over. A set that holds a
 // private or symmetric key is refused, since a published set never should.
+// As RFC 7517 §5 recommends, a key whose "kty" is not EC, RSA or OKP, or
+// whose curve no signature here uses (such as secp256k1, Ed448 or X25519),
+// is ignored, so a provider can publish a new key type next to the old
+// ones; any other key must be well formed, and a set whose keys are all
+// ignored is refused with [jwk.ErrFormat].
 //
 // https://www.rfc-editor.org/rfc/rfc7517.html#section-4.2
 func KeysFromSet(set *jwk.Set) (Keys, error) {
@@ -118,9 +123,14 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		return nil, errors.New("jwt: nil key set")
 	}
 	var out Keys
+	unknown := 0
 	for i, v := range set.Keys {
 		if jwk.IsPrivate(v) || v[jwk.KeyType] == "oct" {
 			return nil, fmt.Errorf("jwt: key set entry %d is a private or symmetric key", i)
+		}
+		if unrecognizedKey(v) {
+			unknown++
+			continue
 		}
 		if use, ok := v[jwk.PublicKeyUse]; ok && use != "sig" {
 			continue
@@ -139,7 +149,30 @@ func KeysFromSet(set *jwk.Set) (Keys, error) {
 		alg, _ := v[jwk.Algorithm].(string)
 		out = append(out, Key{ID: kid, Algorithm: jwa.Algorithm(alg), Public: public})
 	}
+	if unknown > 0 && len(out) == 0 {
+		return nil, fmt.Errorf("jwt: %w: no key set entry has a supported \"kty\" and \"crv\"", jwk.ErrFormat)
+	}
 	return out, nil
+}
+
+// unrecognizedKey reports whether a set member names a "kty", or for "EC"
+// and "OKP" keys a "crv", that is a string no signature here can use.
+// X25519 is a key-agreement curve, so it is unrecognized for verifying.
+func unrecognizedKey(key jwk.Key) bool {
+	kty, ok := key[jwk.KeyType].(string)
+	if !ok {
+		return false
+	}
+	crv, named := key[jwk.Curve].(string)
+	switch kty {
+	case jwk.KeyTypeRSA:
+		return false
+	case jwk.KeyTypeEC:
+		return named && crv != jwk.CurveP256 && crv != jwk.CurveP384 && crv != jwk.CurveP521
+	case jwk.KeyTypeOKP:
+		return named && crv != jwk.CurveEd25519
+	}
+	return true
 }
 
 // Verifier checks JWTs: their JOSE layer (size, encoding, type,
@@ -224,7 +257,7 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	}
 	signature, err := jws.ParseCritical(token, v.Critical...)
 	if err != nil {
-		return nil, refuse(ErrFormat, "%v", err)
+		return nil, fmt.Errorf("%w: %w: %w", ErrInvalidToken, ErrFormat, err)
 	}
 	// A JWT payload is always base64url-encoded (RFC 7519 §7.2), so "b64"
 	// is refused here although the JWS layer understands it, and so is
@@ -263,13 +296,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := v.checkTimes(claims, true); err != nil {
-		return nil, err
-	}
 
 	keys, err := v.Keys.Keys(ctx, kid)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrKeysUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrKeysUnavailable, err)
 	}
 	verified, tried := false, 0
 	for _, key := range keys {
@@ -291,8 +321,10 @@ func (v *Verifier) Verify(ctx context.Context, token string) (*Token, error) {
 	if err := v.checkClaims(claims); err != nil {
 		return nil, err
 	}
-	// Check the clock again: the key source may have taken a while.
-	if err := v.checkTimes(claims, false); err != nil {
+	// The time claims are judged only now, once the signature has verified,
+	// so a forged token learns nothing from them; the clock is read after
+	// the key source, which may have taken a while.
+	if err := v.checkTimes(claims); err != nil {
 		return nil, err
 	}
 	result := &Token{Header: signature.Header, Claims: tokenClaims(claims), Signature: signature.Signature, raw: token}
@@ -334,10 +366,9 @@ func (v *Verifier) now() time.Time {
 	return v.Now()
 }
 
-// checkTimes checks "exp", "nbf" and "iat". When early is set it runs
-// before the signature check, so it reports only what is cheap and
-// certain; the full check repeats after.
-func (v *Verifier) checkTimes(claims map[string]any, early bool) error {
+// checkTimes checks "exp", "nbf" and "iat". It runs after the signature
+// check.
+func (v *Verifier) checkTimes(claims map[string]any) error {
 	now, leeway := v.now(), cmp.Or(v.Leeway, DefaultLeeway)
 	expiry, hasExpiry, err := dateClaim(claims, ExpirationTime)
 	if err != nil {
@@ -348,9 +379,6 @@ func (v *Verifier) checkTimes(claims map[string]any, early bool) error {
 	}
 	if hasExpiry && !now.Before(expiry.Add(leeway)) {
 		return fmt.Errorf("%w: %w: expired at %s", ErrInvalidToken, ErrExpired, expiry.UTC().Format(time.RFC3339))
-	}
-	if early {
-		return nil
 	}
 	if notBefore, ok, err := dateClaim(claims, NotBefore); err != nil {
 		return err
@@ -516,8 +544,10 @@ func typeAccepted(typ string, accepted []string) bool {
 }
 
 // canonical reports whether every segment of token is canonical unpadded
-// base64url (RFC 7515 §2), so one signed token has exactly one string form
-// and caches keyed by the raw token cannot be bypassed.
+// base64url (RFC 7515 §2), so a signature has exactly one encoding. That does
+// not make the token string unique: an ECDSA signature (r, s) and (r, n-s)
+// both verify, so a holder can mint a second valid string for an ES* token.
+// Caches must key on "jti", never on the raw token.
 func canonical(token string) bool {
 	for segment := range strings.SplitSeq(token, ".") {
 		if segment == "" {

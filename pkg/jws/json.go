@@ -156,14 +156,20 @@ type jsonWireSig struct {
 	Signature *string        `json:"signature"`
 }
 
+// maxSignatures bounds the signatures of a JSON serialization, so a message
+// cannot make Verify do unbounded work.
+const maxSignatures = 16
+
 // ParseJSON parses a JWS in the general or flattened JSON Serialization.
 // It checks the structure, not the signatures: call [JSON.Verify].
 //
 // As RFC 7515 requires, every signature must have a header with "alg", its
 // protected and unprotected parameter names must not overlap (§7.2.1),
 // and "crit" must be protected and name only understood extensions
-// (§4.1.11), so any "crit" is refused. Detached payloads (RFC 7515
-// Appendix F) and unencoded payloads (RFC 7797) are not supported.
+// (§4.1.11), so any "crit" is refused. More than 16 signatures are refused
+// with [ErrFormat] before any verification, since [JSON.Verify] does work
+// for each. Detached payloads (RFC 7515 Appendix F) and unencoded payloads
+// (RFC 7797) are not supported.
 func ParseJSON(data []byte) (*JSON, error) {
 	// encoding/json would replace invalid UTF-8 in an unprotected header
 	// with U+FFFD, exposing values that differ from the wire.
@@ -194,6 +200,9 @@ func ParseJSON(data []byte) (*JSON, error) {
 		wire.Signatures = []jsonWireSig{{Protected: wire.Protected, Header: wire.Header, Signature: wire.Signature}}
 	case len(wire.Signatures) == 0:
 		return nil, fail(ErrFormat, "JSON serialization has no signatures")
+	}
+	if len(wire.Signatures) > maxSignatures {
+		return nil, fail(ErrFormat, "%d signatures exceed the limit of %d", len(wire.Signatures), maxSignatures)
 	}
 	payload, err := decodeSegment(*wire.Payload, "payload")
 	if err != nil {

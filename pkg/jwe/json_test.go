@@ -184,7 +184,10 @@ func TestJSONFlattenedAndDirect(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var decrypt any = key
 			if name == "ECDH-ES" {
-				ec, _ := ecdh.X25519().GenerateKey(rand.Reader)
+				ec, err := ecdh.X25519().GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatal(err)
+				}
 				recipient.Key, decrypt = ec.PublicKey(), ec
 			}
 			j, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("one"), []byte("aad"), recipient)
@@ -466,5 +469,31 @@ func TestJSONRefusesInvalidUTF8(t *testing.T) {
 	data := []byte("{\"unprotected\":{\"enc\":\"A128GCM\"},\"header\":{\"alg\":\"A128KW\",\"kid\":\"\xff\"},\"encrypted_key\":\"AA\",\"iv\":\"AA\",\"ciphertext\":\"AA\",\"tag\":\"AA\"}")
 	if _, err := jwe.ParseJSON(data); !errors.Is(err, jwe.ErrMalformed) {
 		t.Fatalf("ParseJSON() error = %v, want ErrMalformed", err)
+	}
+}
+
+// A message with many recipients would make DecryptJSON do one private key
+// operation each, so ParseJSON refuses more than 16 before any crypto.
+func TestParseJSONRecipientLimit(t *testing.T) {
+	kw := make([]byte, 16)
+	for _, tc := range []struct {
+		n    int
+		want error
+	}{{16, nil}, {17, jwe.ErrMalformed}} {
+		recipients := make([]jwe.RecipientKey, tc.n)
+		for i := range recipients {
+			recipients[i] = jwe.RecipientKey{Header: header.Parameters{header.Algorithm: jwa.A128KW}, Key: kw}
+		}
+		j, err := jwe.EncryptJSON(header.Parameters{header.EncryptionAlgorithm: jwa.A256GCM}, nil, []byte("x"), nil, recipients...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire, err := j.General()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := jwe.ParseJSON(wire); !errors.Is(err, tc.want) {
+			t.Fatalf("%d recipients: err = %v, want %v", tc.n, err, tc.want)
+		}
 	}
 }

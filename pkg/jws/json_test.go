@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -360,5 +361,85 @@ func TestParseJSONRefusesInvalidUTF8(t *testing.T) {
 	data := []byte("{\"payload\":\"YQ\",\"protected\":\"eyJhbGciOiJFUzI1NiJ9\",\"header\":{\"kid\":\"\xff\"},\"signature\":\"AA\"}")
 	if _, err := jws.ParseJSON(data); err == nil || !strings.Contains(err.Error(), "UTF-8") {
 		t.Fatalf("ParseJSON() error = %v, want a UTF-8 refusal", err)
+	}
+}
+
+// A message with many signatures would make Verify do work for each, so
+// ParseJSON refuses more than 16 before any verification.
+func TestParseJSONSignatureLimit(t *testing.T) {
+	secret := []byte(strings.Repeat("k", 32))
+	for _, tc := range []struct {
+		n    int
+		want error
+	}{{16, nil}, {17, jws.ErrFormat}} {
+		signers := make([]jws.JSONSigner, tc.n)
+		for i := range signers {
+			signers[i] = jws.JSONSigner{Protected: jws.Header{header.Algorithm: jwa.HS256}, Key: secret}
+		}
+		signed, err := jws.SignJSON([]byte("x"), signers...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire, err := signed.General()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := jws.ParseJSON(wire); !errors.Is(err, tc.want) {
+			t.Fatalf("%d signatures: err = %v, want %v", tc.n, err, tc.want)
+		}
+	}
+}
+
+// encoding/base64 skips CR and LF, which would give one token several
+// valid strings. Parse must refuse them in every segment.
+func TestParseRejectsLineBreaks(t *testing.T) {
+	secret := []byte(strings.Repeat("k", 32))
+	signed, err := jws.New(jws.Header{header.Algorithm: jwa.HS256}, []byte("payload"), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := signed.String()
+	if _, err := jws.Parse(compact); err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(compact, ".")
+	for i, ins := range []string{"\n", "\r\n", "\r"} {
+		mutated := append([]string(nil), parts...)
+		mutated[i] = mutated[i][:2] + ins + mutated[i][2:]
+		if _, err := jws.Parse(strings.Join(mutated, ".")); !errors.Is(err, jws.ErrFormat) {
+			t.Errorf("segment %d with %q: err = %v, want ErrFormat", i, ins, err)
+		}
+	}
+}
+
+// ECDSA signatures are malleable: (r, s) and (r, n-s) both verify. This
+// documents the behavior the package docs warn about; if verification ever
+// starts refusing high-s, make that change deliberately and update the docs.
+func TestECDSAHighSVerifies(t *testing.T) {
+	key := mustECDSA(t, elliptic.P256())
+	signed, err := jws.New(jws.Header{header.Algorithm: jwa.ES256}, []byte("payload"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(signed.String(), ".")
+	sig, err := base64url.Decode(parts[2])
+	if err != nil || len(sig) != 64 {
+		t.Fatalf("signature: %d bytes, %v", len(sig), err)
+	}
+	s := new(big.Int).SetBytes(sig[32:])
+	s.Sub(key.Curve.Params().N, s)
+	flipped := make([]byte, 64)
+	copy(flipped, sig[:32])
+	s.FillBytes(flipped[32:])
+	variant := strings.Join([]string{parts[0], parts[1], base64url.Encode(flipped)}, ".")
+	if variant == signed.String() {
+		t.Fatal("variant equals the original")
+	}
+	parsed, err := jws.Parse(variant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := parsed.Verify(&key.PublicKey); err != nil {
+		t.Fatalf("high-s variant: %v", err)
 	}
 }

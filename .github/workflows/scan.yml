@@ -39,8 +39,11 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
-          go-version-file: go.mod
+          # go.mod sets the oldest Go a consumer may build with; scan the
+          # current release, since a consumer's toolchain supplies the
+          # standard library and old point releases always carry fixed CVEs.
+          go-version: stable
           cache: false
       # The module has no dependencies, so this checks the Go standard
       # library this module calls into for known vulnerabilities.
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

@@ -141,8 +141,12 @@ func (s *Set) checkKeyIDs() error {
 	return nil
 }
 
-// Validate checks that the set has at least one key, that no "kid" repeats,
-// and that every key passes [Validate].
+// Validate checks that the set has at least one usable key, that no "kid"
+// repeats, and that every key passes [Validate]. As RFC 7517 §5 recommends,
+// a key whose "kty", or "EC" or "OKP" "crv", is a string this package does
+// not know is ignored rather than failing the whole set, so a provider can
+// publish a new key type or curve next to the old ones; any other key must
+// be well formed, and a set with only ignored keys is refused.
 func (s *Set) Validate() error {
 	if len(s.Keys) == 0 {
 		return fmt.Errorf("%w: no keys", ErrFormat)
@@ -150,12 +154,41 @@ func (s *Set) Validate() error {
 	if err := s.checkKeyIDs(); err != nil {
 		return err
 	}
+	usable := 0
 	for i, key := range s.Keys {
+		if unrecognized(key) {
+			continue
+		}
 		if err := Validate(key); err != nil {
 			return fmt.Errorf("jwk: key %d: %w", i, err)
 		}
+		usable++
+	}
+	if usable == 0 {
+		return fmt.Errorf("%w: no key has a supported \"kty\" and \"crv\"", ErrFormat)
 	}
 	return nil
+}
+
+// unrecognized reports whether a set member names a "kty", or for "EC" and
+// "OKP" keys a "crv", that is a string this package does not support, so
+// RFC 7517 §5 lets a set ignore it. A member whose type or curve is not a
+// string is malformed, not unrecognized.
+func unrecognized(key Key) bool {
+	kty, ok := key[KeyType].(string)
+	if !ok {
+		return false
+	}
+	crv, named := key[Curve].(string)
+	switch kty {
+	case KeyTypeRSA, KeyTypeOct:
+		return false
+	case KeyTypeEC:
+		return named && crv != CurveP256 && crv != CurveP384 && crv != CurveP521
+	case KeyTypeOKP:
+		return named && crv != CurveEd25519 && crv != CurveX25519
+	}
+	return true
 }
 
 // Get returns the key whose "kid" is kid.

@@ -392,7 +392,9 @@ func TestParsingVulnerabilities(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "invalid type") {
 			t.Fatalf("jwt.Parse() error = %v, want error containing %q", err, "invalid type")
 		}
-		requireRefused(t, verifier, malformedToken, jwt.ErrClaims)
+		// The token is not validly signed, and claims are judged only after
+		// the signature (see TestVerifierChecksSignatureBeforeTime).
+		requireRefused(t, verifier, malformedToken, jwt.ErrSignature)
 	})
 }
 

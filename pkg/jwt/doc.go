@@ -35,6 +35,10 @@
 //
 // # Verifying
 //
+// Key replay and revocation caches on the "jti" claim, never on the raw
+// token string: ECDSA signatures are malleable, so the holder of a valid
+// ES256, ES384 or ES512 token can derive another valid string for it.
+//
 // A [Verifier] checks the signature and the claims in one call, and is the
 // only safe way to accept a token. Following [RFC 8725 §3], it takes the
 // algorithm from an allowlist and never from the token alone, checks "typ",

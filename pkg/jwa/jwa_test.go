@@ -122,6 +122,10 @@ func TestForKey(t *testing.T) {
 		{"RSA 1024", rsaSmall, "", jwa.ErrAlgorithmNotAllowed},
 		{"HMAC secret", []byte("secret"), "", jwa.ErrUnknownAlgorithm},
 		{"nil", nil, "", jwa.ErrUnknownAlgorithm},
+		{"nil RSA private", (*rsa.PrivateKey)(nil), "", jwa.ErrUnknownAlgorithm},
+		{"nil RSA public", (*rsa.PublicKey)(nil), "", jwa.ErrUnknownAlgorithm},
+		{"nil ECDSA private", (*ecdsa.PrivateKey)(nil), "", jwa.ErrUnknownAlgorithm},
+		{"nil ECDSA public", (*ecdsa.PublicKey)(nil), "", jwa.ErrUnknownAlgorithm},
 		{"string", "secret", "", jwa.ErrUnknownAlgorithm},
 	}
 	for _, tt := range tests {

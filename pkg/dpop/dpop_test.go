@@ -125,6 +125,8 @@ func TestSignAndVerify(t *testing.T) {
 }
 
 func TestNewSignerRejectsUnusableKeys(t *testing.T) {
+	// FIPS 140-only mode refuses to generate the key at all, which leaves
+	// a typed nil that must be refused too.
 	small, _ := rsa.GenerateKey(rand.Reader, 1024)
 	if _, err := dpop.NewSigner(small); err == nil {
 		t.Error("accepted a 1024-bit RSA key")
@@ -347,4 +349,38 @@ func mustEncode(t *testing.T, b []byte) string {
 	t.Helper()
 	s := base64url.Encode(b)
 	return s
+}
+
+// A full cache refuses until the earliest entry expires, then frees exactly
+// the expired entries, however the expiries are ordered.
+func TestMemoryReplayCacheEvictsOnlyExpired(t *testing.T) {
+	now := fixedNow
+	cache := dpop.NewMemoryReplayCache(3, func() time.Time { return now })
+	ctx := context.Background()
+	for jti, ttl := range map[string]time.Duration{"a": 3 * time.Minute, "b": time.Minute, "c": 2 * time.Minute} {
+		if seen, err := cache.Seen(ctx, jti, now.Add(ttl)); seen || err != nil {
+			t.Fatalf("%s: %v %v", jti, seen, err)
+		}
+	}
+	now = now.Add(30 * time.Second)
+	if _, err := cache.Seen(ctx, "d", now.Add(time.Minute)); !errors.Is(err, dpop.ErrReplayCacheFull) {
+		t.Fatalf("full cache, nothing expired: %v", err)
+	}
+	now = now.Add(time.Minute) // "b" has expired, "a" and "c" have not
+	if seen, err := cache.Seen(ctx, "d", now.Add(10*time.Minute)); seen || err != nil {
+		t.Fatalf("after one expiry: %v %v", seen, err)
+	}
+	if _, err := cache.Seen(ctx, "e", now.Add(time.Minute)); !errors.Is(err, dpop.ErrReplayCacheFull) {
+		t.Fatalf("full again: %v", err)
+	}
+	if seen, _ := cache.Seen(ctx, "a", now.Add(time.Minute)); !seen {
+		t.Fatal("unexpired entry was evicted")
+	}
+	now = now.Add(time.Minute) // "a" and "c" expired, "d" has not
+	if seen, err := cache.Seen(ctx, "e", now.Add(time.Minute)); seen || err != nil {
+		t.Fatalf("after two expiries: %v %v", seen, err)
+	}
+	if seen, _ := cache.Seen(ctx, "d", now.Add(time.Minute)); !seen {
+		t.Fatal("unexpired entry d was evicted")
+	}
 }

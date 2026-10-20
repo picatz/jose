@@ -131,9 +131,18 @@ func TestCookbookDecrypt(t *testing.T) {
 }
 
 func TestRoundTripEveryAlgorithm(t *testing.T) {
-	p256, _ := ecdh.P256().GenerateKey(rand.Reader)
-	p521, _ := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	x25519, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	p256, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p521, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	x25519, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -333,5 +342,59 @@ func TestOpaqueRecipients(t *testing.T) {
 	}
 	if got, _, err := (jwe.Decrypter{Key: hardwareDecrypter{r}}).Decrypt(compact); err != nil || string(got) != "sealed" {
 		t.Fatalf("Decrypter: %q, %v", got, err)
+	}
+}
+
+// encoding/base64 skips CR and LF, which would give one token several
+// valid strings. Parse must refuse them in every segment.
+func TestParseRejectsLineBreaks(t *testing.T) {
+	key := make([]byte, 16)
+	compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.A128KW, header.EncryptionAlgorithm: jwa.A128GCM}, []byte("x"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(compact, ".")
+	for i, p := range parts {
+		if len(p) < 3 {
+			continue // empty segment: nothing to break
+		}
+		mutated := append([]string(nil), parts...)
+		mutated[i] = p[:2] + "\r\n" + p[2:]
+		if _, err := jwe.Parse(strings.Join(mutated, ".")); !errors.Is(err, jwe.ErrMalformed) {
+			t.Errorf("segment %d: err = %v, want ErrMalformed", i, err)
+		}
+	}
+}
+
+// A tag of the wrong length is refused uniformly, whether it is a prefix of
+// the right tag (truncated) or has extra bytes: truncating a tag weakens
+// authentication.
+func TestWrongLengthTagFailsUniformly(t *testing.T) {
+	for enc, size := range map[jwa.ContentEncryption]int{
+		jwa.A128GCM: 16, jwa.A256GCM: 32, jwa.A128CBCHS256: 32, jwa.A192CBCHS384: 48, jwa.A256CBCHS512: 64,
+	} {
+		t.Run(string(enc), func(t *testing.T) {
+			key := make([]byte, size)
+			rand.Read(key)
+			compact, err := jwe.Encrypt(header.Parameters{header.Algorithm: jwa.Direct, header.EncryptionAlgorithm: enc}, []byte("attack at dawn"), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := decrypterFor(key).Decrypt(compact); err != nil {
+				t.Fatalf("untouched: %v", err)
+			}
+			parts := strings.Split(compact, ".")
+			tag, _ := base64url.Decode(parts[4])
+			for name, bad := range map[string][]byte{
+				"truncated by one": tag[:len(tag)-1],
+				"half":             tag[:len(tag)/2],
+				"extended":         append(append([]byte(nil), tag...), 0),
+			} {
+				parts[4] = base64url.Encode(bad)
+				if _, _, err := decrypterFor(key).Decrypt(strings.Join(parts, ".")); !errors.Is(err, jwe.ErrDecryption) {
+					t.Errorf("%s: err = %v, want ErrDecryption", name, err)
+				}
+			}
+		})
 	}
 }

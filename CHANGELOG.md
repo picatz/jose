@@ -5,8 +5,39 @@ Until v1, minor versions may change the API; every change is listed here.
 
 ## Unreleased
 
+### Stability
+
+- The module reached the reviewed rung of the Keyblade stability ladder on
+  2026-10-20: a second-reader security review, a fuzz target for every parser
+  and verifier, and a fresh-clone run by a non-author
+  ([evidence](docs/evidence/reviewed.md)).
+
 ### Security fixes
 
+- `jwt`: `Verifier` judges `exp`, `nbf` and `iat` only after the signature
+  verifies, so a forged token learns nothing about claim checks (a forged
+  expired token now gives `ErrSignature`, not `ErrExpired`), and it wraps the
+  JWS and key source causes with `%w` so `errors.Is` sees them.
+- `jwa`: `ForKey` refuses a typed nil RSA or ECDSA key, such as a failed
+  `GenerateKey` leaves, instead of panicking.
+- `jwk`, `jwt`: `Set.Validate` and `jwt.KeysFromSet` ignore keys with an
+  unrecognized `kty`, or an `EC` or `OKP` curve they do not support such as
+  `secp256k1` or `Ed448` (RFC 7517 section 5), so one new key type no longer
+  makes a whole JWK Set unusable; a malformed key of a known type, or a set
+  with no usable key, is still refused.
+- `dpop`: a full `MemoryReplayCache` refuses in constant time until its
+  earliest entry expires instead of scanning on every check; the doc now warns
+  that unauthenticated clients can fill it.
+- `jwtchain`: a root whose `cnf` yields no holder thumbprint (empty, or
+  `x5t#S256` only) is refused with `ErrBearer` unless `Policy.AllowBearer` is
+  set, so `Grant.Holder` is never empty by default.
+- `jws`, `jwt`: documented that ES* signatures are malleable, so replay and
+  revocation caches must key on `jti`, not the raw token; corrected the
+  `jwt.Verifier` comment that claimed one string form per token.
+- `internal/base64url`: decoding refuses CR and LF, which `encoding/base64`
+  skips, so a compact JWS or JWE has exactly one string form.
+- `jwe`, `jws`: `ParseJSON` refuses a message with more than 16 recipients or
+  signatures, so `DecryptJSON` and `Verify` do bounded work.
 - `jws`: `Verify` on a parsed compact JWS now covers the current `Payload`,
   not only the payload that was parsed.
 - `jwe`: a compact JWE whose `epk` header has a foreign `kty` no longer

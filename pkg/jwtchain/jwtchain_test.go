@@ -816,3 +816,33 @@ func TestRootVerifier(t *testing.T) {
 		t.Fatal("RootVerifier accepted a link as a root")
 	}
 }
+
+// A root whose "cnf" yields no holder thumbprint must not pass the
+// AllowBearer gate: Grant.Holder would be empty, which a DPoP check reads as
+// "no binding required".
+func TestRootWithoutHolderIsBearer(t *testing.T) {
+	f := newFixture(t)
+	for name, cnf := range map[string]any{
+		"empty cnf":     map[string]any{},
+		"mTLS only":     map[string]any{"x5t#S256": "bwcK0esc3ACC3DB2Y5_lESsXE8o9ltc05O89jdN-dg2"},
+		"jkt plus mTLS": map[string]any{"jkt": strings.Repeat("A", 43), "x5t#S256": "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := f.mintRoot(t, jwt.ClaimsSet{
+				jwt.Issuer:         "https://issuer.example",
+				jwt.Subject:        "alice",
+				jwt.Audience:       []string{"https://api.example"},
+				jwt.ExpirationTime: now.Add(time.Hour).Unix(),
+				jwt.Confirmation:   cnf,
+			})
+			if _, err := f.policy().Verify(t.Context(), root); !errors.Is(err, jwtchain.ErrBearer) {
+				t.Fatalf("Verify() error = %v, want ErrBearer", err)
+			}
+			bearer := f.policy()
+			bearer.AllowBearer = true
+			if v, err := bearer.Verify(t.Context(), root); err != nil || v.Holder != "" {
+				t.Fatalf("AllowBearer: Holder = %q, error = %v", v.Holder, err)
+			}
+		})
+	}
+}

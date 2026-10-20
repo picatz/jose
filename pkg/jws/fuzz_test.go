@@ -1,9 +1,13 @@
 package jws_test
 
 import (
+	"encoding/base64"
+	"slices"
+
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/picatz/jose/pkg/header"
 	"os"
 	"path/filepath"
 	"testing"
@@ -128,6 +132,57 @@ func FuzzParseDetached(f *testing.F) {
 		err = signed.Verify([]byte("fuzz-secret-key-that-is-long-enough-for-hmac-512-algorithms!!"))
 		if err != nil && !errors.Is(err, jws.ErrSignature) && !errors.Is(err, jws.ErrAlgorithm) && !errors.Is(err, jws.ErrFormat) {
 			t.Fatalf("Verify() = %v, want a package sentinel", err)
+		}
+	})
+}
+
+// FuzzParseCritical checks that ParseCritical never panics, that whatever
+// it accepts lists only understood "crit" names (plus "b64", which this
+// package implements), and that Parse, which understands nothing else,
+// never disagrees with it about the payload.
+func FuzzParseCritical(f *testing.F) {
+	understood := []string{"x-exp", "x-tenant"}
+	token := func(header string) string {
+		return base64.RawURLEncoding.EncodeToString([]byte(header)) + ".YQ." + base64.RawURLEncoding.EncodeToString([]byte("sig"))
+	}
+	f.Add(token(`{"alg":"HS256"}`))
+	f.Add(token(`{"alg":"HS256","crit":["x-exp"],"x-exp":1}`))
+	f.Add(token(`{"alg":"HS256","crit":["x-exp","x-tenant"],"x-exp":1,"x-tenant":"a"}`))
+	f.Add(token(`{"alg":"HS256","crit":["b64"],"b64":false}`))
+	f.Add(token(`{"alg":"HS256","crit":["x-other"],"x-other":1}`))
+	f.Add(token(`{"alg":"HS256","crit":["x-exp"]}`))
+	f.Add(token(`{"alg":"HS256","crit":[]}`))
+	f.Add(token(`{"alg":"HS256","crit":["alg"]}`))
+	f.Add(token(`{"alg":"HS256","crit":"x-exp","x-exp":1}`))
+	f.Add(token(`{"alg":"HS256","crit":[1],"x-exp":1}`))
+	f.Add("eyJhbGciOiJub25lIn0.YQ.")
+	f.Add("a.b.c")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, input string) {
+		signed, err := jws.ParseCritical(input, understood...)
+		if err != nil {
+			return
+		}
+		if crit, ok := signed.Header[header.Critical]; ok {
+			names, ok := crit.([]any)
+			if !ok || len(names) == 0 {
+				t.Fatalf("accepted a malformed crit %#v", crit)
+			}
+			for _, name := range names {
+				s, _ := name.(string)
+				if s != "b64" && !slices.Contains(understood, s) {
+					t.Fatalf("accepted crit name %#v that is not understood", name)
+				}
+				if !signed.Header.Has(s) {
+					t.Fatalf("accepted crit name %q missing from the header", s)
+				}
+			}
+		}
+		if got := signed.String(); got != input && !signed.Header.Has("b64") {
+			t.Fatalf("String() = %q, want the parsed input %q", got, input)
+		}
+		if plain, err := jws.Parse(input); err == nil && !bytes.Equal(plain.Payload, signed.Payload) {
+			t.Fatalf("Parse and ParseCritical disagree on the payload: %q vs %q", plain.Payload, signed.Payload)
 		}
 	})
 }
